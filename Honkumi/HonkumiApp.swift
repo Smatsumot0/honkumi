@@ -1,17 +1,12 @@
-//
-//  HonkumiApp.swift
-//  Honkumi
-//
-//  Created by 松本沙愛 on 2026/05/26.
-//
-
 import SwiftUI
 
 @main
 struct HonkumiApp: App {
+    @StateObject private var documentStore = DocumentStore()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(documentStore: documentStore)
         }
     }
 }
