@@ -4,14 +4,17 @@ struct WorkListView: View {
     @ObservedObject var documentStore: DocumentStore
     let onSelectWork: () -> Void
     let onShowDefaultSettings: () -> Void
+    let onShowDefaultColophonSettings: () -> Void
 
     @State private var categoryName = ""
     @State private var workTitle = ""
+    @State private var newWorkCategoryId: UUID?
     @State private var editingCategory: WorkCategory?
     @State private var editingWork: ManuscriptDocument?
     @State private var movingWork: ManuscriptDocument?
     @State private var targetedDropCategoryId: UUID?
     @State private var showsNewCategoryAlert = false
+    @State private var showsNewWorkAlert = false
     @State private var showsRenameCategoryAlert = false
     @State private var showsRenameWorkAlert = false
 
@@ -30,8 +33,15 @@ struct WorkListView: View {
                 }
 
                 Button {
-                    documentStore.createWork()
-                    onSelectWork()
+                    onShowDefaultColophonSettings()
+                } label: {
+                    Label("発行者情報", systemImage: "person.crop.rectangle")
+                }
+
+                Button {
+                    workTitle = ""
+                    newWorkCategoryId = nil
+                    showsNewWorkAlert = true
                 } label: {
                     Label("作品を追加", systemImage: "doc.badge.plus")
                 }
@@ -50,6 +60,17 @@ struct WorkListView: View {
                 documentStore.createCategory(name: categoryName)
             }
             Button("キャンセル", role: .cancel) {}
+        }
+        .alert("作品を作成", isPresented: $showsNewWorkAlert) {
+            TextField("タイトル", text: $workTitle)
+            Button("作成") {
+                documentStore.createWork(title: workTitle, in: newWorkCategoryId)
+                newWorkCategoryId = nil
+                onSelectWork()
+            }
+            Button("キャンセル", role: .cancel) {
+                newWorkCategoryId = nil
+            }
         }
         .alert("カテゴリ名を変更", isPresented: $showsRenameCategoryAlert) {
             TextField("カテゴリ名", text: $categoryName)
@@ -125,8 +146,9 @@ struct WorkListView: View {
             Text(category.name)
             Spacer()
             Button {
-                documentStore.createWork(in: category.id)
-                onSelectWork()
+                workTitle = ""
+                newWorkCategoryId = category.id
+                showsNewWorkAlert = true
             } label: {
                 Image(systemName: "plus")
             }

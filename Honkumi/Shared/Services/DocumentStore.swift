@@ -10,6 +10,7 @@ final class DocumentStore: ObservableObject {
     private let legacyStorageKey = "honkumi.currentDocument"
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var pendingBodyUndoSnapshots: [UUID: [String]] = [:]
 
     init() {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -51,6 +52,10 @@ final class DocumentStore: ObservableObject {
         appData.userDefaultSettings
     }
 
+    var subscriptionStatus: SubscriptionStatus {
+        appData.subscriptionStatus
+    }
+
     func works(in category: WorkCategory) -> [ManuscriptDocument] {
         works
             .filter { $0.categoryId == category.id }
@@ -65,14 +70,15 @@ final class DocumentStore: ObservableObject {
     }
 
     @discardableResult
-    func createWork(in categoryId: UUID? = nil) -> ManuscriptDocument {
+    func createWork(title: String = "", in categoryId: UUID? = nil) -> ManuscriptDocument {
         var createdWork = ManuscriptDocument()
         updateAppData { data in
             let targetCategoryId = categoryId ?? WorkCategory.uncategorizedId
             let categoryExists = data.categories.contains(where: { $0.id == targetCategoryId })
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
             createdWork = ManuscriptDocument(
                 categoryId: categoryExists ? targetCategoryId : WorkCategory.uncategorizedId,
-                title: "無題の作品",
+                title: trimmedTitle.isEmpty ? "無題の作品" : trimmedTitle,
                 body: "",
                 settings: data.userDefaultSettings.validated
             )
@@ -101,11 +107,24 @@ final class DocumentStore: ObservableObject {
         }
     }
 
-    func updateBody(_ body: String) {
+    func updateBody(_ body: String, recordsUndoSnapshot: Bool = false) {
         guard let id = appData.activeWorkId else { return }
+        if recordsUndoSnapshot, let work = appData.works.first(where: { $0.id == id }), work.body != body {
+            pendingBodyUndoSnapshots[id, default: []].append(work.body)
+        }
         updateWork(id: id) { work in
             work.body = body
         }
+    }
+
+    func takePendingBodyUndoSnapshots(for id: UUID) -> [String] {
+        let snapshots = pendingBodyUndoSnapshots[id] ?? []
+        pendingBodyUndoSnapshots[id] = nil
+        return snapshots
+    }
+
+    func discardPendingBodyUndoSnapshots(for id: UUID) {
+        pendingBodyUndoSnapshots[id] = nil
     }
 
     func updateTitle(_ title: String) {
@@ -214,7 +233,8 @@ final class DocumentStore: ObservableObject {
             categories: [.uncategorized],
             works: [migratedDocument],
             userDefaultSettings: migratedDocument.settings.validated,
-            activeWorkId: migratedDocument.id
+            activeWorkId: migratedDocument.id,
+            subscriptionStatus: .free
         )
     }
 

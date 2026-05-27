@@ -4,6 +4,7 @@ struct ContentView: View {
     @ObservedObject var documentStore: DocumentStore
     @State private var showsWorkspace = false
     @State private var presentedSettingsScope: SettingsViewModel.Scope?
+    @State private var presentedColophonScope: SettingsViewModel.Scope?
 
     var body: some View {
         NavigationStack {
@@ -14,6 +15,9 @@ struct ContentView: View {
                 },
                 onShowDefaultSettings: {
                     presentedSettingsScope = .userDefault
+                },
+                onShowDefaultColophonSettings: {
+                    presentedColophonScope = .userDefault
                 }
             )
             .navigationTitle("作品")
@@ -29,6 +33,16 @@ struct ContentView: View {
                 SettingsView(viewModel: SettingsViewModel(documentStore: documentStore, scope: scope))
                     .navigationTitle(scope.title)
                     .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .sheet(item: $presentedColophonScope) { scope in
+            NavigationStack {
+                ColophonSettingsView(
+                    viewModel: SettingsViewModel(documentStore: documentStore, scope: scope),
+                    mode: scope.colophonMode
+                )
+                .navigationTitle(scope.colophonTitle)
+                .navigationBarTitleDisplayMode(.inline)
             }
         }
     }
@@ -108,6 +122,24 @@ extension SettingsViewModel.Scope: Identifiable {
             "activeWork"
         case .userDefault:
             "userDefault"
+        }
+    }
+
+    var colophonTitle: String {
+        switch self {
+        case .activeWork:
+            "奥付設定"
+        case .userDefault:
+            "発行者情報"
+        }
+    }
+
+    var colophonMode: ColophonSettingsView.Mode {
+        switch self {
+        case .activeWork:
+            .activeWork
+        case .userDefault:
+            .userDefault
         }
     }
 

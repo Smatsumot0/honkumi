@@ -2,10 +2,51 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
+    @State private var selectedTab: SettingsTab = .print
+    @State private var showsFormatConfirmation = false
+    @State private var formatCompletionMessage = ""
     private let settingTitleWidth: CGFloat = 112
     private let settingValueWidth: CGFloat = 72
 
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("設定カテゴリ", selection: $selectedTab) {
+                ForEach(SettingsTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding()
+            .background(.bar)
+
+            switch selectedTab {
+            case .print:
+                printSettingsForm
+            case .format:
+                formatSettingsForm
+            }
+        }
+        .alert("本文をフォーマット", isPresented: $showsFormatConfirmation) {
+            Button("実行") {
+                applyFormat()
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("現在の本文にフォーマットを適用します。\nこの操作はUndoできます。\n実行しますか？")
+        }
+        .alert("フォーマット完了", isPresented: Binding(
+            get: { !formatCompletionMessage.isEmpty },
+            set: { if !$0 { formatCompletionMessage = "" } }
+        )) {
+            Button("OK") {
+                formatCompletionMessage = ""
+            }
+        } message: {
+            Text(formatCompletionMessage)
+        }
+    }
+
+    private var printSettingsForm: some View {
         Form {
             Section("用紙") {
                 Picker("サイズ", selection: Binding(
@@ -35,6 +76,24 @@ struct SettingsView: View {
                     step: 0.5,
                     format: "%.1f pt",
                     update: viewModel.updateFontSize
+                )
+
+                valueStepper(
+                    title: "行間",
+                    value: viewModel.settings.lineSpacing,
+                    range: EditorSettings.lineSpacingRange,
+                    step: 0.5,
+                    format: "%.1f pt",
+                    update: viewModel.updateLineSpacing
+                )
+
+                valueStepper(
+                    title: "字間",
+                    value: viewModel.settings.characterSpacing,
+                    range: EditorSettings.characterSpacingRange,
+                    step: 0.5,
+                    format: "%.1f pt",
+                    update: viewModel.updateCharacterSpacing
                 )
 
                 intStepper(
@@ -118,16 +177,104 @@ struct SettingsView: View {
                 ))
             }
 
+            Section("奥付") {
+                Toggle("奥付を追加", isOn: colophonBinding(\.isEnabled))
+
+                if viewModel.isActiveWorkScope, viewModel.settings.colophon.isEnabled {
+                    if viewModel.settings.colophon.publicationDate != nil {
+                        DatePicker(
+                            "発行日",
+                            selection: publicationDateBinding,
+                            displayedComponents: .date
+                        )
+                        Button("発行日を空欄にする") {
+                            viewModel.updateColophon { colophon in
+                                colophon.publicationDate = nil
+                            }
+                        }
+                        .foregroundStyle(.secondary)
+                    } else {
+                        Button("発行日を入力") {
+                            viewModel.updateColophon { colophon in
+                                colophon.publicationDate = Date()
+                            }
+                        }
+                    }
+
+                    TextField("印刷所名", text: colophonBinding(\.printerName))
+                }
+            }
+
             Section("ページ番号") {
-                Picker("表示位置", selection: Binding(
-                    get: { viewModel.settings.pageNumberPosition },
-                    set: { viewModel.updatePageNumberPosition($0) }
-                )) {
-                    ForEach(PageNumberPosition.allCases) { position in
-                        Text(position.displayName).tag(position)
+                if viewModel.subscriptionStatus == .paid {
+                    Picker("表示位置", selection: Binding(
+                        get: { viewModel.settings.pageNumberPosition },
+                        set: { viewModel.updatePageNumberPosition($0) }
+                    )) {
+                        ForEach(PageNumberPosition.allCases) { position in
+                            Text(position.displayName).tag(position)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } else {
+                    Toggle("ページ番号を表示", isOn: Binding(
+                        get: { viewModel.settings.pageNumberPosition != .hidden },
+                        set: { viewModel.updatePageNumberPosition($0 ? .outside : .hidden) }
+                    ))
+                }
+            }
+        }
+    }
+
+    private var formatSettingsForm: some View {
+        Form {
+            Section {
+                if viewModel.isActiveWorkScope {
+                    PrimaryButton("本文をフォーマットする", systemImage: "wand.and.sparkles") {
+                        showsFormatConfirmation = true
+                    }
+                } else {
+                    Text("デフォルト設定ではフォーマット項目だけを保存します。本文への適用は作品の設定から実行できます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("無料で使える項目") {
+                ForEach(ManuscriptFormatter.freeRules) { rule in
+                    formatRuleRow(rule)
+
+                    if rule.id == \.enableIndent, viewModel.settings.formatSettings.enableIndent {
+                        Toggle("「 や 『 で始まる行は字下げしない", isOn: Binding(
+                            get: { viewModel.settings.formatSettings.skipIndentBeforeOpeningQuote },
+                            set: { newValue in
+                                viewModel.updateFormatSettings {
+                                    $0.skipIndentBeforeOpeningQuote = newValue
+                                }
+                            }
+                        ))
+                    }
+
+                    if rule.id == \.enableNormalizeBlankLines,
+                       viewModel.settings.formatSettings.enableNormalizeBlankLines {
+                        intStepper(
+                            title: "空行の上限",
+                            value: viewModel.settings.formatSettings.maxConsecutiveBlankLines,
+                            unit: "行",
+                            range: EditorSettings.maxConsecutiveBlankLinesRange
+                        ) { newValue in
+                            viewModel.updateFormatSettings {
+                                $0.maxConsecutiveBlankLines = newValue
+                            }
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
+            }
+
+            Section("有料機能") {
+                ForEach(ManuscriptFormatter.premiumRules) { rule in
+                    formatRuleRow(rule)
+                }
             }
         }
     }
@@ -170,6 +317,28 @@ struct SettingsView: View {
         }
     }
 
+    private func colophonBinding<Value>(_ keyPath: WritableKeyPath<ColophonSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { viewModel.settings.colophon[keyPath: keyPath] },
+            set: { newValue in
+                viewModel.updateColophon { colophon in
+                    colophon[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
+    private var publicationDateBinding: Binding<Date> {
+        Binding(
+            get: { viewModel.settings.colophon.publicationDate ?? Date() },
+            set: { newValue in
+                viewModel.updateColophon { colophon in
+                    colophon.publicationDate = newValue
+                }
+            }
+        )
+    }
+
     private func settingLabel(title: String, value: String) -> some View {
         HStack(spacing: 12) {
             Text(title)
@@ -179,6 +348,56 @@ struct SettingsView: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: settingValueWidth, alignment: .leading)
+        }
+    }
+
+    private func formatRuleRow(_ rule: FormatRule) -> some View {
+        let isLocked = rule.premium && !viewModel.isPremiumUser
+
+        return Toggle(isOn: Binding(
+            get: { viewModel.settings.formatSettings[keyPath: rule.id] },
+            set: { viewModel.updateFormatRule(rule.id, isEnabled: $0) }
+        )) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(rule.label)
+                    if rule.premium {
+                        Text("有料")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor, in: Capsule())
+                    }
+                }
+
+                Text(rule.description)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .disabled(isLocked)
+    }
+
+    private func applyFormat() {
+        let changed = viewModel.applyFormatToCurrentBody()
+        formatCompletionMessage = changed ? "本文にフォーマットを適用しました。" : "変更はありませんでした。"
+    }
+}
+
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case print
+    case format
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .print:
+            "印刷設定"
+        case .format:
+            "フォーマット設定"
         }
     }
 }

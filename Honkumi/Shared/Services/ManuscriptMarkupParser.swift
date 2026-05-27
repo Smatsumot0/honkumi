@@ -14,6 +14,7 @@ enum ManuscriptMarkupParser {
         var segments: [ParsedManuscriptSegment] = []
         var currentText = ""
         var currentChapterTitle: String?
+        var startsChapter = false
         var startsAfterPageBreak = false
         var didUseTableOfContentsTag = false
 
@@ -25,10 +26,12 @@ enum ManuscriptMarkupParser {
                 appendSegment(
                     text: currentText,
                     chapterTitle: currentChapterTitle,
+                    startsChapter: startsChapter,
                     startsAfterPageBreak: startsAfterPageBreak,
                     to: &segments
                 )
                 currentText = ""
+                startsChapter = false
                 startsAfterPageBreak = true
                 remainingLine = String(remainingLine[range.upperBound...])
             }
@@ -38,9 +41,11 @@ enum ManuscriptMarkupParser {
                     appendSegment(
                         text: currentText,
                         chapterTitle: currentChapterTitle,
+                        startsChapter: startsChapter,
                         startsAfterPageBreak: startsAfterPageBreak,
                         to: &segments
                     )
+                    startsChapter = false
                     startsAfterPageBreak = false
                 }
 
@@ -63,13 +68,16 @@ enum ManuscriptMarkupParser {
                     appendSegment(
                         text: currentText,
                         chapterTitle: currentChapterTitle,
+                        startsChapter: startsChapter,
                         startsAfterPageBreak: startsAfterPageBreak,
                         to: &segments
                     )
+                    startsChapter = false
                     startsAfterPageBreak = false
                 }
                 currentText = ""
                 currentChapterTitle = chapterTitle
+                startsChapter = true
                 continue
             }
 
@@ -82,6 +90,7 @@ enum ManuscriptMarkupParser {
         appendSegment(
             text: currentText,
             chapterTitle: currentChapterTitle,
+            startsChapter: startsChapter,
             startsAfterPageBreak: startsAfterPageBreak,
             to: &segments
         )
@@ -142,6 +151,7 @@ enum ManuscriptMarkupParser {
     private static func appendSegment(
         text: String,
         chapterTitle: String?,
+        startsChapter: Bool,
         startsAfterPageBreak: Bool,
         to segments: inout [ParsedManuscriptSegment]
     ) {
@@ -150,6 +160,7 @@ enum ManuscriptMarkupParser {
             segments.append(ParsedManuscriptSegment(
                 text: trimmedText,
                 chapterTitle: chapterTitle,
+                startsChapter: startsChapter,
                 startsAfterPageBreak: startsAfterPageBreak,
                 isTableOfContentsPlaceholder: false
             ))
@@ -164,17 +175,20 @@ struct ParsedManuscript: Equatable {
 struct ParsedManuscriptSegment: Equatable {
     let text: String
     let chapterTitle: String?
+    let startsChapter: Bool
     let startsAfterPageBreak: Bool
     let isTableOfContentsPlaceholder: Bool
 
     init(
         text: String,
         chapterTitle: String?,
+        startsChapter: Bool = false,
         startsAfterPageBreak: Bool,
         isTableOfContentsPlaceholder: Bool = false
     ) {
         self.text = text
         self.chapterTitle = chapterTitle
+        self.startsChapter = startsChapter
         self.startsAfterPageBreak = startsAfterPageBreak
         self.isTableOfContentsPlaceholder = isTableOfContentsPlaceholder
     }

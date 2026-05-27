@@ -47,6 +47,18 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
+    var subscriptionStatus: SubscriptionStatus {
+        documentStore.subscriptionStatus
+    }
+
+    var isPremiumUser: Bool {
+        subscriptionStatus == .paid
+    }
+
+    var isActiveWorkScope: Bool {
+        scope == .activeWork
+    }
+
     func updatePageSize(_ value: PageSize) {
         var updated = settings
         updated.pageSize = value
@@ -141,5 +153,37 @@ final class SettingsViewModel: ObservableObject {
         var updated = settings
         updated.pageNumberPosition = value
         settings = updated
+    }
+
+    func updateColophon(_ changes: (inout ColophonSettings) -> Void) {
+        var updated = settings
+        changes(&updated.colophon)
+        settings = updated
+    }
+
+    func updateFormatSettings(_ changes: (inout FormatSettings) -> Void) {
+        var updated = settings
+        changes(&updated.formatSettings)
+        settings = updated
+    }
+
+    func updateFormatRule(_ keyPath: WritableKeyPath<FormatSettings, Bool>, isEnabled: Bool) {
+        updateFormatSettings { formatSettings in
+            formatSettings[keyPath: keyPath] = isEnabled
+        }
+    }
+
+    func applyFormatToCurrentBody() -> Bool {
+        guard isActiveWorkScope else { return false }
+
+        let formattedBody = ManuscriptFormatter.formatManuscriptText(
+            document.body,
+            settings: settings.formatSettings,
+            options: FormatOptions(isPremiumUser: isPremiumUser)
+        )
+        guard formattedBody != document.body else { return false }
+
+        documentStore.updateBody(formattedBody, recordsUndoSnapshot: true)
+        return true
     }
 }

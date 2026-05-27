@@ -9,11 +9,13 @@ final class EditorViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var undoStack: [String] = []
     private var redoStack: [String] = []
+    private var suppressNextDocumentChangeUndo = false
     private let historyLimit = 100
 
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
         self.document = documentStore.document
+        self.undoStack = documentStore.takePendingBodyUndoSnapshots(for: document.id)
 
         documentStore.$document
             .sink { [weak self] document in
@@ -21,6 +23,15 @@ final class EditorViewModel: ObservableObject {
                 if self.document.id != document.id {
                     self.undoStack.removeAll()
                     self.redoStack.removeAll()
+                    self.suppressNextDocumentChangeUndo = false
+                } else if self.document.body != document.body {
+                    if self.suppressNextDocumentChangeUndo {
+                        self.suppressNextDocumentChangeUndo = false
+                    } else {
+                        self.recordUndoSnapshot(self.document.body)
+                        self.redoStack.removeAll()
+                        self.documentStore.discardPendingBodyUndoSnapshots(for: document.id)
+                    }
                 }
                 self.document = document
             }
@@ -43,6 +54,32 @@ final class EditorViewModel: ObservableObject {
 
     var pageCount: Int {
         ManuscriptPaginator.pages(for: document).count
+    }
+
+    func canMoveUp(from selectedRange: NSRange) -> Bool {
+        selectedRange.location > (chapterNavigationDestinations().first ?? 0)
+    }
+
+    func canMoveDown(from selectedRange: NSRange) -> Bool {
+        selectedRange.location < (chapterNavigationDestinations().last ?? 0)
+    }
+
+    func rangeForMovingUp(from selectedRange: NSRange) -> NSRange? {
+        let location = selectedRange.location
+        return chapterNavigationDestinations()
+            .last(where: { $0 < location })
+            .map { NSRange(location: $0, length: 0) }
+    }
+
+    func rangeForMovingDown(from selectedRange: NSRange) -> NSRange? {
+        let location = selectedRange.location
+        return chapterNavigationDestinations()
+            .first(where: { $0 > location })
+            .map { NSRange(location: $0, length: 0) }
+    }
+
+    func rangeForMovingToBottom() -> NSRange {
+        NSRange(location: (document.body as NSString).length, length: 0)
     }
 
     func insert(_ text: String, replacing selectedRange: NSRange, cursorOffsetFromEnd: Int = 0) -> NSRange {
@@ -143,18 +180,81 @@ final class EditorViewModel: ObservableObject {
         guard newBody != document.body else { return }
 
         if recordsUndo {
-            undoStack.append(document.body)
-            if undoStack.count > historyLimit {
-                undoStack.removeFirst(undoStack.count - historyLimit)
-            }
+            recordUndoSnapshot(document.body)
             redoStack.removeAll()
         }
 
+        suppressNextDocumentChangeUndo = true
         documentStore.updateBody(newBody)
+    }
+
+    private func recordUndoSnapshot(_ body: String) {
+        undoStack.append(body)
+        if undoStack.count > historyLimit {
+            undoStack.removeFirst(undoStack.count - historyLimit)
+        }
     }
 
     private func clampedInsertionRange(_ range: NSRange, in text: String) -> NSRange {
         let length = (text as NSString).length
         return NSRange(location: min(max(range.location, 0), length), length: 0)
+    }
+
+    private func chapterNavigationDestinations() -> [Int] {
+        let body = document.body as NSString
+        let chapterStarts = chapterStartLocations(in: body)
+        guard !chapterStarts.isEmpty else {
+            return Array(Set([0, body.length])).sorted()
+        }
+
+        var destinations = Set([0, body.length])
+        for (index, start) in chapterStarts.enumerated() {
+            destinations.insert(start)
+
+            let nextStart = chapterStarts.indices.contains(index + 1) ? chapterStarts[index + 1] : body.length
+            destinations.insert(chapterEndLocation(before: nextStart, in: body))
+        }
+
+        return destinations.sorted()
+    }
+
+    private func chapterStartLocations(in body: NSString) -> [Int] {
+        var locations: [Int] = []
+        var location = 0
+
+        while location < body.length {
+            let lineRange = body.lineRange(for: NSRange(location: location, length: 0))
+            let line = body.substring(with: lineRange)
+
+            if isChapterLine(line) {
+                locations.append(lineRange.location)
+            }
+
+            location = lineRange.location + max(lineRange.length, 1)
+        }
+
+        return locations
+    }
+
+    private func isChapterLine(_ line: String) -> Bool {
+        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isBracketChapter = trimmedLine.hasPrefix(ManuscriptMarkupParser.chapterTagPrefix)
+            && trimmedLine.hasSuffix(ManuscriptMarkupParser.chapterTagSuffix)
+        return isBracketChapter || trimmedLine.hasPrefix("# ")
+    }
+
+    private func chapterEndLocation(before nextStart: Int, in body: NSString) -> Int {
+        guard nextStart > 0 else { return 0 }
+
+        var location = min(nextStart, body.length)
+        while location > 0 {
+            let previous = body.substring(with: NSRange(location: location - 1, length: 1))
+            if previous != "\n" && previous != "\r" {
+                break
+            }
+            location -= 1
+        }
+
+        return location
     }
 }

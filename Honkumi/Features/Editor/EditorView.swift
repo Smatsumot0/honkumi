@@ -15,6 +15,12 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            chapterNavigationToolbar
+
+            if showsSearchReplaceSheet {
+                searchReplacePanel
+            }
+
             ManuscriptTextEditor(text: Binding(
                 get: { viewModel.body },
                 set: { viewModel.body = $0 }
@@ -52,9 +58,77 @@ struct EditorView: View {
             }
             Button("キャンセル", role: .cancel) {}
         }
-        .sheet(isPresented: $showsSearchReplaceSheet) {
-            searchReplaceSheet
+    }
+
+    private var chapterNavigationToolbar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Button {
+                        moveUp()
+                    } label: {
+                        Image(systemName: "arrow.up")
+                    }
+                    .accessibilityLabel("上に移動")
+                    .disabled(!viewModel.canMoveUp(from: selectedRange))
+
+                    Button {
+                        moveDown()
+                    } label: {
+                        Image(systemName: "arrow.down")
+                    }
+                    .accessibilityLabel("下に移動")
+                    .disabled(!viewModel.canMoveDown(from: selectedRange))
+
+                    Button {
+                        moveToBottom()
+                    } label: {
+                        Image(systemName: "arrow.down.to.line")
+                    }
+                    .accessibilityLabel("一番下に移動")
+                    .disabled(!viewModel.canMoveDown(from: selectedRange))
+                }
+                .buttonStyle(.bordered)
+                .padding(4)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+
+                Divider()
+                    .frame(height: 28)
+
+                HStack(spacing: 8) {
+                    Button {
+                        applyUndo()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .accessibilityLabel("取り消す")
+
+                    Button {
+                        applyRedo()
+                    } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                    }
+                    .accessibilityLabel("やり直す")
+
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            showsSearchReplaceSheet.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("検索と置換")
+                }
+                .buttonStyle(.bordered)
+                .padding(4)
+                .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+
+                Spacer(minLength: 0)
+            }
         }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     private var insertionToolbar: some View {
@@ -72,35 +146,8 @@ struct EditorView: View {
                     showsChapterTitleAlert = true
                 }
                 .buttonStyle(.bordered)
-                insertionButton("目次", inserts: "\n\(ManuscriptMarkupParser.tableOfContentsTag)\n")
                 insertionButton("改ページ", inserts: "\n\(ManuscriptMarkupParser.pageBreakTag)\n")
                 insertionButton("全角スペース", inserts: "　")
-            }
-
-            HStack(spacing: 8) {
-                Button {
-                    applyUndo()
-                } label: {
-                    Image(systemName: "arrow.uturn.backward")
-                }
-                .accessibilityLabel("取り消す")
-                .buttonStyle(.bordered)
-
-                Button {
-                    applyRedo()
-                } label: {
-                    Image(systemName: "arrow.uturn.forward")
-                }
-                .accessibilityLabel("やり直す")
-                .buttonStyle(.bordered)
-
-                Button {
-                    showsSearchReplaceSheet = true
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                }
-                .accessibilityLabel("検索と置換")
-                .buttonStyle(.bordered)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,7 +169,7 @@ struct EditorView: View {
         .buttonStyle(.bordered)
     }
 
-    private var searchReplaceSheet: some View {
+    private var searchReplacePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("検索／置換")
@@ -137,11 +184,13 @@ struct EditorView: View {
                 .accessibilityLabel("閉じる")
             }
 
-            TextField("検索文字列", text: $searchText)
-                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                TextField("検索文字列", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
 
-            TextField("置換後文字列", text: $replacementText)
-                .textFieldStyle(.roundedBorder)
+                TextField("置換後文字列", text: $replacementText)
+                    .textFieldStyle(.roundedBorder)
+            }
 
             HStack(spacing: 8) {
                 Button("検索") {
@@ -177,9 +226,9 @@ struct EditorView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding()
-        .presentationDetents([.height(searchMessage.isEmpty ? 210 : 235)])
-        .presentationDragIndicator(.visible)
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.thinMaterial)
     }
 
     private func insertChapterTitle() {
@@ -192,6 +241,24 @@ struct EditorView: View {
         )
         selectedRange = insertedRange
         requestedSelectedRange = insertedRange
+    }
+
+    private func moveUp() {
+        guard let range = viewModel.rangeForMovingUp(from: selectedRange) else { return }
+        selectedRange = range
+        requestedSelectedRange = range
+    }
+
+    private func moveDown() {
+        guard let range = viewModel.rangeForMovingDown(from: selectedRange) else { return }
+        selectedRange = range
+        requestedSelectedRange = range
+    }
+
+    private func moveToBottom() {
+        let range = viewModel.rangeForMovingToBottom()
+        selectedRange = range
+        requestedSelectedRange = range
     }
 
     private func findNext() {
