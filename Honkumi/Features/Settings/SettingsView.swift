@@ -3,8 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
     @State private var selectedTab: SettingsTab = .print
-    @State private var showsFormatConfirmation = false
-    @State private var formatCompletionMessage = ""
     private let settingTitleWidth: CGFloat = 112
     private let settingValueWidth: CGFloat = 72
 
@@ -26,24 +24,6 @@ struct SettingsView: View {
                 formatSettingsForm
             }
         }
-        .alert("本文をフォーマット", isPresented: $showsFormatConfirmation) {
-            Button("実行") {
-                applyFormat()
-            }
-            Button("キャンセル", role: .cancel) {}
-        } message: {
-            Text("現在の本文にフォーマットを適用します。\nこの操作はUndoできます。\n実行しますか？")
-        }
-        .alert("フォーマット完了", isPresented: Binding(
-            get: { !formatCompletionMessage.isEmpty },
-            set: { if !$0 { formatCompletionMessage = "" } }
-        )) {
-            Button("OK") {
-                formatCompletionMessage = ""
-            }
-        } message: {
-            Text(formatCompletionMessage)
-        }
     }
 
     private var printSettingsForm: some View {
@@ -60,12 +40,19 @@ struct SettingsView: View {
             }
 
             Section("組版") {
-                Picker("フォント", selection: Binding(
-                    get: { viewModel.settings.japaneseFont },
-                    set: { viewModel.updateJapaneseFont($0) }
-                )) {
-                    ForEach(JapaneseFont.allCases) { font in
-                        Text(font.displayName).tag(font)
+                NavigationLink {
+                    fontSettingsView
+                } label: {
+                    HStack {
+                        Text("フォント")
+                        Spacer()
+                        Text(currentFontDisplayName)
+                            .font(AppFontCatalog.swiftUIFont(
+                                selectedFontId: viewModel.settings.selectedFontId,
+                                size: 17,
+                                isAdditionalFontPackUnlocked: true
+                            ))
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -229,31 +216,23 @@ struct SettingsView: View {
     private var formatSettingsForm: some View {
         Form {
             Section {
-                if viewModel.isActiveWorkScope {
-                    PrimaryButton("本文をフォーマットする", systemImage: "wand.and.sparkles") {
-                        showsFormatConfirmation = true
+                Toggle("本文入力時に自動フォーマット", isOn: Binding(
+                    get: { viewModel.settings.formatSettings.enableAutoFormat },
+                    set: { newValue in
+                        viewModel.updateFormatSettings {
+                            $0.enableAutoFormat = newValue
+                        }
                     }
-                } else {
-                    Text("デフォルト設定ではフォーマット項目だけを保存します。本文への適用は作品の設定から実行できます。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                ))
+
+                Text("オンにした項目は、本文入力時に自動で反映されます。\n日本語入力の変換中はフォーマットされず、確定後に反映されます。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section("無料で使える項目") {
                 ForEach(ManuscriptFormatter.freeRules) { rule in
                     formatRuleRow(rule)
-
-                    if rule.id == \.enableIndent, viewModel.settings.formatSettings.enableIndent {
-                        Toggle("「 や 『 で始まる行は字下げしない", isOn: Binding(
-                            get: { viewModel.settings.formatSettings.skipIndentBeforeOpeningQuote },
-                            set: { newValue in
-                                viewModel.updateFormatSettings {
-                                    $0.skipIndentBeforeOpeningQuote = newValue
-                                }
-                            }
-                        ))
-                    }
 
                     if rule.id == \.enableNormalizeBlankLines,
                        viewModel.settings.formatSettings.enableNormalizeBlankLines {
@@ -277,6 +256,68 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var fontSettingsView: some View {
+        Form {
+            Section("フォント") {
+                ForEach(AppFontCatalog.all) { font in
+                    fontRow(font)
+                }
+            }
+
+            Section("フォントライセンス") {
+                ForEach(AppFontCatalog.all) { font in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(font.displayName)
+                            .font(AppFontCatalog.swiftUIFont(
+                                selectedFontId: font.id,
+                                size: 15,
+                                isAdditionalFontPackUnlocked: true
+                            ))
+                        Text(font.licenseName)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(font.copyrightText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .navigationTitle("フォント設定")
+    }
+
+    private var currentFontDisplayName: String {
+        AppFontCatalog.font(id: viewModel.settings.selectedFontId)?.displayName ?? "BIZ UD明朝"
+    }
+
+    private func fontRow(_ font: AppFont) -> some View {
+        let isSelected = viewModel.settings.selectedFontId == font.id
+
+        return Button {
+            viewModel.updateSelectedFontId(font.id)
+        } label: {
+            HStack(spacing: 12) {
+                Text(font.displayName)
+                    .font(AppFontCatalog.swiftUIFont(
+                        selectedFontId: font.id,
+                        size: 17,
+                        isAdditionalFontPackUnlocked: true
+                    ))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.blue)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func intStepper(
@@ -362,12 +403,7 @@ struct SettingsView: View {
                 HStack(spacing: 8) {
                     Text(rule.label)
                     if rule.premium {
-                        Text("有料")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor, in: Capsule())
+                        paidFeatureBadge
                     }
                 }
 
@@ -380,10 +416,15 @@ struct SettingsView: View {
         .disabled(isLocked)
     }
 
-    private func applyFormat() {
-        let changed = viewModel.applyFormatToCurrentBody()
-        formatCompletionMessage = changed ? "本文にフォーマットを適用しました。" : "変更はありませんでした。"
+    private var paidFeatureBadge: some View {
+        Text("有料")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.blue, in: Capsule())
     }
+
 }
 
 private enum SettingsTab: String, CaseIterable, Identifiable {

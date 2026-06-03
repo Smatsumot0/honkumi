@@ -24,7 +24,7 @@ struct EditorView: View {
             ManuscriptTextEditor(text: Binding(
                 get: { viewModel.body },
                 set: { viewModel.body = $0 }
-            ), selectedRange: $selectedRange, requestedSelectedRange: $requestedSelectedRange, isEditing: $isBodyEditorActive, command: $editorCommand, fontName: viewModel.document.settings.japaneseFont.postScriptName)
+            ), selectedRange: $selectedRange, requestedSelectedRange: $requestedSelectedRange, isEditing: $isBodyEditorActive, command: $editorCommand, selectedFontId: viewModel.document.settings.selectedFontId, isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked, formatSettings: viewModel.formatSettings, formatOptions: viewModel.formatOptions)
             .padding(8)
             .overlay(alignment: .topLeading) {
                 if viewModel.body.isEmpty && !isBodyEditorActive {
@@ -41,6 +41,9 @@ struct EditorView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Text("\(viewModel.pageCount)ページ")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("400字換算 \(viewModel.manuscriptSheetCount)枚")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -89,7 +92,8 @@ struct EditorView: View {
                     .disabled(!viewModel.canMoveDown(from: selectedRange))
                 }
                 .buttonStyle(.bordered)
-                .padding(4)
+                .controlSize(.small)
+                .padding(3)
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
 
                 Divider()
@@ -120,7 +124,8 @@ struct EditorView: View {
                     .accessibilityLabel("検索と置換")
                 }
                 .buttonStyle(.bordered)
-                .padding(4)
+                .controlSize(.small)
+                .padding(3)
                 .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
 
                 Spacer(minLength: 0)
@@ -132,27 +137,37 @@ struct EditorView: View {
     }
 
     private var insertionToolbar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
                 insertionButton("「」", cursorOffsetFromEnd: 1)
                 insertionButton("（）", cursorOffsetFromEnd: 1)
-                insertionButton("……")
-                insertionButton("──")
-            }
-
-            HStack(spacing: 8) {
-                Button("章タイトル") {
+                insertionButton("…", inserts: "……")
+                insertionButton("ー", inserts: "ーー")
+                Button {
                     chapterTitle = ""
                     showsChapterTitleAlert = true
+                } label: {
+                    ChapterTitleBannerIcon()
+                        .frame(width: 18, height: 14)
                 }
+                .accessibilityLabel("章タイトル")
                 .buttonStyle(.bordered)
-                insertionButton("改ページ", inserts: "\n\(ManuscriptMarkupParser.pageBreakTag)\n")
-                insertionButton("全角スペース", inserts: "　")
+                .controlSize(.small)
+                insertionIconButton(
+                    systemImage: "arrow.turn.down.left",
+                    accessibilityLabel: "改ページ",
+                    inserts: "\n\(ManuscriptMarkupParser.pageBreakTag)\n"
+                )
+                insertionTextButton(
+                    title: "＿",
+                    accessibilityLabel: "全角スペース",
+                    inserts: "　"
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .background(.thinMaterial)
     }
 
@@ -167,6 +182,49 @@ struct EditorView: View {
             requestedSelectedRange = insertedRange
         }
         .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
+    private func insertionTextButton(
+        title: String,
+        accessibilityLabel: String,
+        inserts text: String,
+        cursorOffsetFromEnd: Int = 0
+    ) -> some View {
+        Button(title) {
+            let insertedRange = viewModel.insert(
+                text,
+                replacing: selectedRange,
+                cursorOffsetFromEnd: cursorOffsetFromEnd
+            )
+            selectedRange = insertedRange
+            requestedSelectedRange = insertedRange
+        }
+        .accessibilityLabel(accessibilityLabel)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
+    private func insertionIconButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        inserts text: String,
+        cursorOffsetFromEnd: Int = 0
+    ) -> some View {
+        Button {
+            let insertedRange = viewModel.insert(
+                text,
+                replacing: selectedRange,
+                cursorOffsetFromEnd: cursorOffsetFromEnd
+            )
+            selectedRange = insertedRange
+            requestedSelectedRange = insertedRange
+        } label: {
+            Image(systemName: systemImage)
+        }
+        .accessibilityLabel(accessibilityLabel)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     private var searchReplacePanel: some View {
@@ -328,5 +386,28 @@ struct EditorView: View {
         guard let range = viewModel.redo(currentRange: selectedRange) else { return }
         selectedRange = range
         requestedSelectedRange = range
+    }
+}
+
+private struct ChapterTitleBannerIcon: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let rect = geometry.frame(in: .local)
+            let width = rect.width
+            let height = rect.height
+
+            Path { path in
+                path.move(to: CGPoint(x: rect.minX + width * 0.08, y: rect.minY + height * 0.16))
+                path.addLine(to: CGPoint(x: rect.minX + width * 0.78, y: rect.minY + height * 0.16))
+                path.addLine(to: CGPoint(x: rect.minX + width * 0.96, y: rect.minY + height * 0.50))
+                path.addLine(to: CGPoint(x: rect.minX + width * 0.78, y: rect.minY + height * 0.84))
+                path.addLine(to: CGPoint(x: rect.minX + width * 0.08, y: rect.minY + height * 0.84))
+                path.addLine(to: CGPoint(x: rect.minX + width * 0.24, y: rect.minY + height * 0.50))
+                path.closeSubpath()
+            }
+            .stroke(
+                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+            )
+        }
     }
 }

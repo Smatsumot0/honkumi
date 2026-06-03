@@ -10,7 +10,6 @@ final class DocumentStore: ObservableObject {
     private let legacyStorageKey = "honkumi.currentDocument"
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    private var pendingBodyUndoSnapshots: [UUID: [String]] = [:]
 
     init() {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -54,6 +53,10 @@ final class DocumentStore: ObservableObject {
 
     var subscriptionStatus: SubscriptionStatus {
         appData.subscriptionStatus
+    }
+
+    var isAdditionalFontPackUnlocked: Bool {
+        appData.subscriptionStatus == .paid
     }
 
     func works(in category: WorkCategory) -> [ManuscriptDocument] {
@@ -107,24 +110,11 @@ final class DocumentStore: ObservableObject {
         }
     }
 
-    func updateBody(_ body: String, recordsUndoSnapshot: Bool = false) {
+    func updateBody(_ body: String) {
         guard let id = appData.activeWorkId else { return }
-        if recordsUndoSnapshot, let work = appData.works.first(where: { $0.id == id }), work.body != body {
-            pendingBodyUndoSnapshots[id, default: []].append(work.body)
-        }
         updateWork(id: id) { work in
             work.body = body
         }
-    }
-
-    func takePendingBodyUndoSnapshots(for id: UUID) -> [String] {
-        let snapshots = pendingBodyUndoSnapshots[id] ?? []
-        pendingBodyUndoSnapshots[id] = nil
-        return snapshots
-    }
-
-    func discardPendingBodyUndoSnapshots(for id: UUID) {
-        pendingBodyUndoSnapshots[id] = nil
     }
 
     func updateTitle(_ title: String) {

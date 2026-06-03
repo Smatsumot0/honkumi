@@ -10,12 +10,6 @@ struct FormatRule: Identifiable, Equatable {
 enum ManuscriptFormatter {
     static let freeRules: [FormatRule] = [
         FormatRule(
-            id: \.enableIndent,
-            label: "段落先頭の字下げ",
-            description: "段落先頭に全角スペースを入れます。空行や、すでに字下げ済みの行は変更しません。",
-            premium: false
-        ),
-        FormatRule(
             id: \.enableNormalizeBlankLines,
             label: "連続空行の整理",
             description: "連続した空行を指定した行数までに制限します。",
@@ -31,6 +25,12 @@ enum ManuscriptFormatter {
             id: \.enableNormalizePageBreakSpacing,
             label: "改ページタグの整理",
             description: "\(ManuscriptMarkupParser.pageBreakTag) の前後に多すぎる空行がある場合だけ整えます。",
+            premium: false
+        ),
+        FormatRule(
+            id: \.enableNormalizeConsecutiveExclamationQuestion,
+            label: "連続する感嘆符・疑問符の半角化",
+            description: "！？、！！、？？ など連続する感嘆符・疑問符を半角に整えます。",
             premium: false
         )
     ]
@@ -78,17 +78,14 @@ enum ManuscriptFormatter {
         options: FormatOptions
     ) -> String {
         let effectiveSettings = settings.validated
+        guard effectiveSettings.enableAutoFormat else {
+            return text
+        }
+
         var formatted = text
 
         if effectiveSettings.enableTrimLineSpaces {
             formatted = trimLineSpaces(formatted)
-        }
-
-        if effectiveSettings.enableIndent {
-            formatted = indentParagraphs(
-                formatted,
-                skipsOpeningQuote: effectiveSettings.skipIndentBeforeOpeningQuote
-            )
         }
 
         if effectiveSettings.enableNormalizeBlankLines {
@@ -100,6 +97,10 @@ enum ManuscriptFormatter {
 
         if effectiveSettings.enableNormalizePageBreakSpacing {
             formatted = normalizePageBreakSpacing(formatted)
+        }
+
+        if effectiveSettings.enableNormalizeConsecutiveExclamationQuestion {
+            formatted = normalizeConsecutiveExclamationQuestion(formatted)
         }
 
         guard options.isPremiumUser else {
@@ -135,22 +136,6 @@ enum ManuscriptFormatter {
             .map { line in
                 String(line)
                     .trimmingCharacters(in: CharacterSet(charactersIn: " "))
-            }
-            .joined(separator: "\n")
-    }
-
-    private static func indentParagraphs(_ text: String, skipsOpeningQuote: Bool) -> String {
-        text
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { line -> String in
-                let line = String(line)
-                guard !line.isEmpty else { return line }
-                guard !line.hasPrefix("　") else { return line }
-                guard !line.isMarkupOnlyLine else { return line }
-                if skipsOpeningQuote, line.hasPrefix("「") || line.hasPrefix("『") {
-                    return line
-                }
-                return "　" + line
             }
             .joined(separator: "\n")
     }
@@ -229,6 +214,24 @@ enum ManuscriptFormatter {
         )
     }
 
+    private static func normalizeConsecutiveExclamationQuestion(_ text: String) -> String {
+        let pattern = #"[！？?!]{2,}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+
+        let nsText = text as NSString
+        var normalized = text
+
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)).reversed() {
+            let replacement = nsText
+                .substring(with: match.range)
+                .replacingOccurrences(of: "！", with: "!")
+                .replacingOccurrences(of: "？", with: "?")
+            normalized = (normalized as NSString).replacingCharacters(in: match.range, with: replacement)
+        }
+
+        return normalized
+    }
+
     private static func normalizePunctuation(_ text: String) -> String {
         text
             .replacingOccurrences(of: ",", with: "、")
@@ -239,16 +242,5 @@ enum ManuscriptFormatter {
         text
             .replacingOccurrences(of: "(", with: "（")
             .replacingOccurrences(of: ")", with: "）")
-    }
-}
-
-extension String {
-    fileprivate var isMarkupOnlyLine: Bool {
-        let trimmed = trimmingCharacters(in: .whitespaces)
-        return trimmed == ManuscriptMarkupParser.pageBreakTag
-            || trimmed == ManuscriptMarkupParser.tableOfContentsTag
-            || (trimmed.hasPrefix(ManuscriptMarkupParser.chapterTagPrefix)
-                && trimmed.hasSuffix(ManuscriptMarkupParser.chapterTagSuffix))
-            || trimmed.hasPrefix("# ")
     }
 }

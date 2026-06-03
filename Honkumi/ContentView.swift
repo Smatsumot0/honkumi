@@ -52,6 +52,10 @@ private struct WorkspaceView: View {
     @ObservedObject var documentStore: DocumentStore
     @Binding var presentedSettingsScope: SettingsViewModel.Scope?
     @State private var selectedSection: AppSection = .editor
+    @State private var previewPageScale: CGFloat = 1
+    @State private var previewFocusedPage = 1
+    @State private var previewHorizontalAnchor: CGFloat = 0.5
+    @State private var previewScrollOffset: CGPoint = .zero
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,7 +75,13 @@ private struct WorkspaceView: View {
                 case .editor:
                     EditorView(viewModel: EditorViewModel(documentStore: documentStore))
                 case .preview:
-                    PreviewView(viewModel: PreviewViewModel(documentStore: documentStore))
+                    PreviewView(
+                        viewModel: PreviewViewModel(documentStore: documentStore),
+                        pageScale: $previewPageScale,
+                        focusedPage: $previewFocusedPage,
+                        horizontalAnchor: $previewHorizontalAnchor,
+                        scrollOffset: $previewScrollOffset
+                    )
                 }
             }
         }

@@ -14,7 +14,7 @@ struct EditorSettings: Codable, Equatable {
     static let maxConsecutiveBlankLinesRange: ClosedRange<Int> = 0...5
 
     var pageSize: PageSize
-    var japaneseFont: JapaneseFont
+    var selectedFontId: String
     var fontSize: CGFloat
     var lineSpacing: CGFloat
     var characterSpacing: CGFloat
@@ -34,7 +34,7 @@ struct EditorSettings: Codable, Equatable {
 
     init(
         pageSize: PageSize,
-        japaneseFont: JapaneseFont,
+        selectedFontId: String,
         fontSize: CGFloat,
         lineSpacing: CGFloat,
         characterSpacing: CGFloat,
@@ -53,7 +53,7 @@ struct EditorSettings: Codable, Equatable {
         formatSettings: FormatSettings = .default
     ) {
         self.pageSize = pageSize
-        self.japaneseFont = japaneseFont
+        self.selectedFontId = selectedFontId
         self.fontSize = fontSize
         self.lineSpacing = lineSpacing
         self.characterSpacing = characterSpacing
@@ -74,7 +74,7 @@ struct EditorSettings: Codable, Equatable {
 
     static let `default` = EditorSettings(
         pageSize: .a6,
-        japaneseFont: .hiraginoMincho,
+        selectedFontId: AppFontCatalog.defaultFontId,
         fontSize: 9,
         lineSpacing: 0,
         characterSpacing: 0,
@@ -96,7 +96,7 @@ struct EditorSettings: Codable, Equatable {
     var validated: EditorSettings {
         EditorSettings(
             pageSize: pageSize,
-            japaneseFont: japaneseFont.regularized,
+            selectedFontId: selectedFontId.isEmpty ? AppFontCatalog.defaultFontId : selectedFontId,
             fontSize: fontSize.clamped(to: Self.fontSizeRange),
             lineSpacing: lineSpacing.clamped(to: Self.lineSpacingRange),
             characterSpacing: characterSpacing.clamped(to: Self.characterSpacingRange),
@@ -120,6 +120,7 @@ struct EditorSettings: Codable, Equatable {
 extension EditorSettings {
     private enum CodingKeys: String, CodingKey {
         case pageSize
+        case selectedFontId
         case japaneseFont
         case fontSize
         case lineSpacing
@@ -145,7 +146,10 @@ extension EditorSettings {
 
         self.init(
             pageSize: try container.decodeIfPresent(PageSize.self, forKey: .pageSize) ?? defaults.pageSize,
-            japaneseFont: try container.decodeIfPresent(JapaneseFont.self, forKey: .japaneseFont) ?? defaults.japaneseFont,
+            selectedFontId: try container.decodeIfPresent(String.self, forKey: .selectedFontId)
+                ?? Self.selectedFontIdFromLegacyJapaneseFont(
+                    try container.decodeIfPresent(JapaneseFont.self, forKey: .japaneseFont)
+                ),
             fontSize: try container.decodeIfPresent(CGFloat.self, forKey: .fontSize) ?? defaults.fontSize,
             lineSpacing: try container.decodeIfPresent(CGFloat.self, forKey: .lineSpacing) ?? defaults.lineSpacing,
             characterSpacing: try container.decodeIfPresent(CGFloat.self, forKey: .characterSpacing) ?? defaults.characterSpacing,
@@ -164,15 +168,52 @@ extension EditorSettings {
             formatSettings: try container.decodeIfPresent(FormatSettings.self, forKey: .formatSettings) ?? defaults.formatSettings
         )
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pageSize, forKey: .pageSize)
+        try container.encode(selectedFontId, forKey: .selectedFontId)
+        try container.encode(fontSize, forKey: .fontSize)
+        try container.encode(lineSpacing, forKey: .lineSpacing)
+        try container.encode(characterSpacing, forKey: .characterSpacing)
+        try container.encode(charactersPerLine, forKey: .charactersPerLine)
+        try container.encode(linesPerPage, forKey: .linesPerPage)
+        try container.encode(marginTop, forKey: .marginTop)
+        try container.encode(marginBottom, forKey: .marginBottom)
+        try container.encode(marginInner, forKey: .marginInner)
+        try container.encode(marginOuter, forKey: .marginOuter)
+        try container.encode(pageNumberPosition, forKey: .pageNumberPosition)
+        try container.encode(showTableOfContents, forKey: .showTableOfContents)
+        try container.encode(showChapterTitle, forKey: .showChapterTitle)
+        try container.encode(chapterTitleStyle, forKey: .chapterTitleStyle)
+        try container.encode(startsChapterOnNewPage, forKey: .startsChapterOnNewPage)
+        try container.encode(colophon, forKey: .colophon)
+        try container.encode(formatSettings, forKey: .formatSettings)
+    }
+
+    private static func selectedFontIdFromLegacyJapaneseFont(_ font: JapaneseFont?) -> String {
+        switch font?.regularized {
+        case .hiraginoSans, .hiraginoMaruGothic:
+            "biz-ud-gothic"
+        case .hiraginoMincho:
+            AppFontCatalog.defaultFontId
+        case .none:
+            AppFontCatalog.defaultFontId
+        case .some(.hiraginoSansBold), .some(.hiraginoMinchoBold):
+            AppFontCatalog.defaultFontId
+        }
+    }
 }
 
 struct FormatSettings: Codable, Equatable {
+    var enableAutoFormat: Bool
     var enableIndent: Bool
     var skipIndentBeforeOpeningQuote: Bool
     var enableTrimLineSpaces: Bool
     var enableNormalizeBlankLines: Bool
     var maxConsecutiveBlankLines: Int
     var enableNormalizePageBreakSpacing: Bool
+    var enableNormalizeConsecutiveExclamationQuestion: Bool
     var enableNormalizeEllipsis: Bool
     var enableNormalizeDash: Bool
     var enableSpaceAfterExclamationQuestion: Bool
@@ -180,12 +221,14 @@ struct FormatSettings: Codable, Equatable {
     var enableNormalizeBrackets: Bool
 
     static let `default` = FormatSettings(
+        enableAutoFormat: false,
         enableIndent: false,
         skipIndentBeforeOpeningQuote: true,
         enableTrimLineSpaces: true,
         enableNormalizeBlankLines: true,
         maxConsecutiveBlankLines: 1,
         enableNormalizePageBreakSpacing: true,
+        enableNormalizeConsecutiveExclamationQuestion: false,
         enableNormalizeEllipsis: false,
         enableNormalizeDash: false,
         enableSpaceAfterExclamationQuestion: false,
@@ -204,6 +247,45 @@ struct FormatSettings: Codable, Equatable {
 
 struct FormatOptions: Equatable {
     var isPremiumUser: Bool
+}
+
+extension FormatSettings {
+    private enum CodingKeys: String, CodingKey {
+        case enableAutoFormat
+        case enableIndent
+        case skipIndentBeforeOpeningQuote
+        case enableTrimLineSpaces
+        case enableNormalizeBlankLines
+        case maxConsecutiveBlankLines
+        case enableNormalizePageBreakSpacing
+        case enableNormalizeConsecutiveExclamationQuestion
+        case enableNormalizeEllipsis
+        case enableNormalizeDash
+        case enableSpaceAfterExclamationQuestion
+        case enableNormalizePunctuation
+        case enableNormalizeBrackets
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = FormatSettings.default
+
+        self.init(
+            enableAutoFormat: try container.decodeIfPresent(Bool.self, forKey: .enableAutoFormat) ?? defaults.enableAutoFormat,
+            enableIndent: try container.decodeIfPresent(Bool.self, forKey: .enableIndent) ?? defaults.enableIndent,
+            skipIndentBeforeOpeningQuote: try container.decodeIfPresent(Bool.self, forKey: .skipIndentBeforeOpeningQuote) ?? defaults.skipIndentBeforeOpeningQuote,
+            enableTrimLineSpaces: try container.decodeIfPresent(Bool.self, forKey: .enableTrimLineSpaces) ?? defaults.enableTrimLineSpaces,
+            enableNormalizeBlankLines: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeBlankLines) ?? defaults.enableNormalizeBlankLines,
+            maxConsecutiveBlankLines: try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveBlankLines) ?? defaults.maxConsecutiveBlankLines,
+            enableNormalizePageBreakSpacing: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizePageBreakSpacing) ?? defaults.enableNormalizePageBreakSpacing,
+            enableNormalizeConsecutiveExclamationQuestion: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeConsecutiveExclamationQuestion) ?? defaults.enableNormalizeConsecutiveExclamationQuestion,
+            enableNormalizeEllipsis: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeEllipsis) ?? defaults.enableNormalizeEllipsis,
+            enableNormalizeDash: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeDash) ?? defaults.enableNormalizeDash,
+            enableSpaceAfterExclamationQuestion: try container.decodeIfPresent(Bool.self, forKey: .enableSpaceAfterExclamationQuestion) ?? defaults.enableSpaceAfterExclamationQuestion,
+            enableNormalizePunctuation: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizePunctuation) ?? defaults.enableNormalizePunctuation,
+            enableNormalizeBrackets: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeBrackets) ?? defaults.enableNormalizeBrackets
+        )
+    }
 }
 
 struct ColophonSettings: Codable, Equatable {

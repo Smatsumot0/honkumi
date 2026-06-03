@@ -85,7 +85,11 @@ struct BodyPDFExportService {
     ) {
         switch page.kind {
         case .body:
-            drawVerticalText(page.columns, in: layout)
+            drawVerticalText(
+                page.columns,
+                isAdditionalFontPackUnlocked: subscriptionStatus == .paid,
+                in: layout
+            )
         case let .colophon(colophon):
             drawColophonContent(
                 colophon,
@@ -99,7 +103,11 @@ struct BodyPDFExportService {
            layout.settings.showChapterTitle,
            let chapterTitle = page.chapterTitle,
            !page.chapterTitlesStartingOnPage.contains(chapterTitle) {
-            drawChapterTitle(chapterTitle, in: layout)
+            drawChapterTitle(
+                chapterTitle,
+                isAdditionalFontPackUnlocked: subscriptionStatus == .paid,
+                in: layout
+            )
         }
 
         if page.kind == .body {
@@ -122,13 +130,25 @@ struct BodyPDFExportService {
         subscriptionStatus: SubscriptionStatus,
         in layout: PageLayout
     ) {
-        drawHorizontalColophon(colophon, subscriptionStatus: subscriptionStatus, in: layout)
+        drawHorizontalColophon(
+            colophon,
+            subscriptionStatus: subscriptionStatus,
+            isAdditionalFontPackUnlocked: subscriptionStatus == .paid,
+            in: layout
+        )
     }
 
-    private func drawVerticalText(_ columns: [String], in layout: PageLayout) {
+    private func drawVerticalText(
+        _ columns: [String],
+        isAdditionalFontPackUnlocked: Bool,
+        in layout: PageLayout
+    ) {
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont(name: layout.settings.japaneseFont.postScriptName, size: layout.fontSize)
-                ?? UIFont.systemFont(ofSize: layout.fontSize),
+            .font: pdfFont(
+                size: layout.fontSize,
+                in: layout,
+                isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+            ),
             .kern: layout.settings.characterSpacing
         ]
         let lineCount = layout.settings.linesPerPage
@@ -136,29 +156,69 @@ struct BodyPDFExportService {
 
         for displayIndex in (0..<lineCount).reversed() {
             let sourceColumn = columns.indices.contains(displayIndex) ? columns[displayIndex] : ""
+            let cells = verticalCells(from: sourceColumn, characterCount: characterCount)
+            let rowAdvance = adjustedCharacterAdvance(
+                cellCount: cells.count,
+                characterCount: characterCount,
+                bodyHeight: layout.bodyFrame.height,
+                rowHeight: layout.characterAdvance
+            )
             let columnOffset = lineCount - 1 - displayIndex
             let x = layout.bodyFrame.maxX - CGFloat(columnOffset + 1) * layout.lineAdvance
 
-            for rowIndex in 0..<characterCount {
-                let character = character(at: rowIndex, in: sourceColumn)
-                guard !character.isEmpty else { continue }
-
-                let glyph = pdfGlyph(for: character)
-                let rect = CGRect(
-                    x: x,
-                    y: layout.bodyFrame.minY + CGFloat(rowIndex) * layout.characterAdvance,
-                    width: layout.lineAdvance,
-                    height: layout.characterAdvance
-                )
-                let attributedText = NSAttributedString(string: glyph, attributes: attributes)
-                attributedText.draw(in: rect)
+            for (rowIndex, characters) in cells.enumerated() {
+                for (index, character) in characters.enumerated() {
+                    let glyph = pdfGlyph(for: character)
+                    let offset = pdfGlyphOffset(
+                        for: character,
+                        in: characters,
+                        overflowIndex: index,
+                        layout: layout,
+                        rowAdvance: rowAdvance
+                    )
+                    let glyphAttributes = pdfAttributes(
+                        for: character,
+                        baseAttributes: attributes,
+                        in: layout,
+                        isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+                    )
+                    let rect = CGRect(
+                        x: x + offset.x,
+                        y: layout.bodyFrame.minY + CGFloat(rowIndex) * rowAdvance + offset.y,
+                        width: layout.lineAdvance,
+                        height: rowAdvance
+                    )
+                    let attributedText = NSAttributedString(string: glyph, attributes: glyphAttributes)
+                    attributedText.draw(in: rect)
+                }
             }
         }
     }
 
-    private func drawChapterTitle(_ title: String, in layout: PageLayout) {
-        let font = UIFont(name: layout.settings.japaneseFont.postScriptName, size: max(layout.fontSize * 0.8, 6))
-            ?? UIFont.systemFont(ofSize: max(layout.fontSize * 0.8, 6))
+    private func adjustedCharacterAdvance(
+        cellCount: Int,
+        characterCount: Int,
+        bodyHeight: CGFloat,
+        rowHeight: CGFloat
+    ) -> CGFloat {
+        guard cellCount > 1 else { return rowHeight }
+        guard cellCount > characterCount || cellCount >= characterCount - 2 else {
+            return rowHeight
+        }
+
+        return max((bodyHeight - rowHeight) / CGFloat(cellCount - 1), 1)
+    }
+
+    private func drawChapterTitle(
+        _ title: String,
+        isAdditionalFontPackUnlocked: Bool,
+        in layout: PageLayout
+    ) {
+        let font = pdfFont(
+            size: max(layout.fontSize * 0.8, 6),
+            in: layout,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+        )
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: UIColor.secondaryLabel
@@ -211,11 +271,15 @@ struct BodyPDFExportService {
     private func drawHorizontalColophon(
         _ colophon: ColophonSettings,
         subscriptionStatus: SubscriptionStatus,
+        isAdditionalFontPackUnlocked: Bool,
         in layout: PageLayout
     ) {
         let entries = ManuscriptPaginator.colophonEntries(from: colophon)
-        let font = UIFont(name: layout.settings.japaneseFont.postScriptName, size: layout.fontSize)
-            ?? UIFont.systemFont(ofSize: layout.fontSize)
+        let font = pdfFont(
+            size: layout.fontSize,
+            in: layout,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+        )
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: UIColor.secondaryLabel
@@ -433,8 +497,11 @@ struct BodyPDFExportService {
 
         let metrics = verticalHorizontalColophonMetrics(in: layout)
         let valueAttributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont(name: layout.settings.japaneseFont.postScriptName, size: layout.fontSize)
-                ?? UIFont.systemFont(ofSize: layout.fontSize)
+            .font: pdfFont(
+                size: layout.fontSize,
+                in: layout,
+                isAdditionalFontPackUnlocked: true
+            )
         ]
         let urlWidth = (colophon.websiteURL as NSString).size(withAttributes: valueAttributes).width
         let rect = CGRect(
@@ -450,8 +517,11 @@ struct BodyPDFExportService {
         let entries = ManuscriptPaginator.verticalHorizontalColophonEntries(from: colophon)
         guard !entries.isEmpty else { return }
 
-        let font = UIFont(name: layout.settings.japaneseFont.postScriptName, size: layout.fontSize)
-            ?? UIFont.systemFont(ofSize: layout.fontSize)
+        let font = pdfFont(
+            size: layout.fontSize,
+            in: layout,
+            isAdditionalFontPackUnlocked: true
+        )
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: UIColor.secondaryLabel
@@ -600,10 +670,131 @@ struct BodyPDFExportService {
         return UIImage(cgImage: cgImage)
     }
 
-    private func character(at index: Int, in column: String) -> String {
-        guard index < column.count else { return "" }
-        let stringIndex = column.index(column.startIndex, offsetBy: index)
-        return String(column[stringIndex])
+    private func verticalCells(from column: String, characterCount: Int) -> [[String]] {
+        let characters = column.map(String.init)
+        var cells: [[String]] = []
+        var index = 0
+
+        while index < characters.count {
+            let character = characters[index]
+            if isEllipsis(character) {
+                cells.append([character])
+                index += 1
+                while characters.indices.contains(index), isEllipsis(characters[index]) {
+                    index += 1
+                }
+            } else if isPunctuation(character),
+               characters.indices.contains(index + 1),
+               isClosingQuote(characters[index + 1]) {
+                cells.append([character, characters[index + 1]])
+                index += 2
+            } else {
+                cells.append([character])
+                index += 1
+            }
+        }
+
+        return cells
+    }
+
+    private func pdfGlyphOffset(
+        for character: String,
+        in characters: [String],
+        overflowIndex: Int,
+        layout: PageLayout,
+        rowAdvance: CGFloat
+    ) -> CGPoint {
+        let punctuationOffset: CGPoint
+        if isPunctuation(character) {
+            punctuationOffset = CGPoint(x: layout.lineAdvance * 0.38, y: -rowAdvance * 0.40)
+        } else if isSmallKana(character) {
+            punctuationOffset = CGPoint(x: layout.lineAdvance * 0.30, y: -rowAdvance * 0.32)
+        } else {
+            punctuationOffset = .zero
+        }
+        guard overflowIndex > 0 else { return punctuationOffset }
+
+        if isPunctuation(character), characters.first.map(isPunctuation) == false {
+            return CGPoint(x: punctuationOffset.x, y: rowAdvance * 0.38)
+        }
+
+        if isClosingQuote(character), characters.first.map(isPunctuation) == false {
+            return CGPoint(x: -layout.lineAdvance * 0.02, y: rowAdvance * 0.34)
+        }
+
+        if isClosingQuote(character), characters.first.map(isPunctuation) == true {
+            return CGPoint(x: -layout.lineAdvance * 0.02, y: rowAdvance * 0.34)
+        }
+
+        let overflowYOffset = isPunctuation(character)
+            ? rowAdvance * 0.38
+            : -rowAdvance * 0.18 * CGFloat(overflowIndex)
+
+        return CGPoint(
+            x: punctuationOffset.x,
+            y: punctuationOffset.y + overflowYOffset
+        )
+    }
+
+    private func isPunctuation(_ character: String) -> Bool {
+        ["、", "。", "､", "｡", "，", "．"].contains(character)
+    }
+
+    private func isClosingQuote(_ character: String) -> Bool {
+        ["」", "』"].contains(character)
+    }
+
+    private func isEllipsis(_ character: String) -> Bool {
+        ["…", "‥"].contains(character)
+    }
+
+    private func isLineStartProhibited(_ character: String) -> Bool {
+        [
+            "、", "。", "，", "．", "・", "：", "；", "！", "？",
+            "」", "』", "）", "】", "》", "〉", "］", "｝"
+        ].contains(character)
+    }
+
+    private func isSmallKana(_ character: String) -> Bool {
+        [
+            "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ",
+            "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ"
+        ].contains(character)
+    }
+
+    private func isDashLike(_ character: String) -> Bool {
+        ["―", "─", "—", "ｰ", "ー"].contains(character)
+    }
+
+    private func pdfAttributes(
+        for character: String,
+        baseAttributes: [NSAttributedString.Key: Any],
+        in layout: PageLayout,
+        isAdditionalFontPackUnlocked: Bool
+    ) -> [NSAttributedString.Key: Any] {
+        guard isDashLike(character) else {
+            return baseAttributes
+        }
+
+        var attributes = baseAttributes
+        attributes[.font] = pdfFont(
+            size: layout.fontSize * 0.78,
+            in: layout,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+        )
+        return attributes
+    }
+
+    private func pdfFont(
+        size: CGFloat,
+        in layout: PageLayout,
+        isAdditionalFontPackUnlocked: Bool
+    ) -> UIFont {
+        AppFontCatalog.uiFont(
+            selectedFontId: layout.settings.selectedFontId,
+            size: size,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+        )
     }
 
     private func pdfGlyph(for character: String) -> String {

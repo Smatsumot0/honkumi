@@ -15,7 +15,6 @@ final class EditorViewModel: ObservableObject {
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
         self.document = documentStore.document
-        self.undoStack = documentStore.takePendingBodyUndoSnapshots(for: document.id)
 
         documentStore.$document
             .sink { [weak self] document in
@@ -30,7 +29,6 @@ final class EditorViewModel: ObservableObject {
                     } else {
                         self.recordUndoSnapshot(self.document.body)
                         self.redoStack.removeAll()
-                        self.documentStore.discardPendingBodyUndoSnapshots(for: document.id)
                     }
                 }
                 self.document = document
@@ -52,8 +50,24 @@ final class EditorViewModel: ObservableObject {
         ManuscriptMarkupParser.characterCountBody(from: document.body).count
     }
 
+    var manuscriptSheetCount: Int {
+        max(Int(ceil(Double(characterCount) / 400.0)), characterCount == 0 ? 0 : 1)
+    }
+
     var pageCount: Int {
         ManuscriptPaginator.pages(for: document).count
+    }
+
+    var formatSettings: FormatSettings {
+        document.settings.formatSettings
+    }
+
+    var formatOptions: FormatOptions {
+        FormatOptions(isPremiumUser: documentStore.subscriptionStatus == .paid)
+    }
+
+    var isAdditionalFontPackUnlocked: Bool {
+        documentStore.isAdditionalFontPackUnlocked
     }
 
     func canMoveUp(from selectedRange: NSRange) -> Bool {

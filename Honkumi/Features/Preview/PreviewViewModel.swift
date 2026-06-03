@@ -67,28 +67,54 @@ enum ManuscriptPaginator {
         let settings = document.settings.validated
         let parsedSegments = ManuscriptMarkupParser.parse(document.body).segments
         let segments = normalizedSegments(parsedSegments, settings: settings)
-        var tableOfContentsEntries = chapterEntries(in: paginate(segments, settings: settings, tableOfContentsEntries: []))
+        var tableOfContentsEntries = chapterEntries(in: paginate(
+            segments,
+            settings: settings,
+            workTitle: document.title,
+            tableOfContentsEntries: []
+        ))
 
         guard settings.showTableOfContents else {
             return appendingColophonIfNeeded(
-                to: paginate(segments, settings: settings, tableOfContentsEntries: []),
+                to: paginate(segments, settings: settings, workTitle: document.title, tableOfContentsEntries: []),
+                hasColophonPlaceholder: segments.contains(where: \.isColophonPlaceholder),
                 settings: settings,
                 workTitle: document.title
             )
         }
 
-        var pages = paginate(segments, settings: settings, tableOfContentsEntries: tableOfContentsEntries)
+        var pages = paginate(
+            segments,
+            settings: settings,
+            workTitle: document.title,
+            tableOfContentsEntries: tableOfContentsEntries
+        )
         for _ in 0..<maxTableOfContentsPasses {
             let updatedEntries = chapterEntries(in: pages)
             if updatedEntries == tableOfContentsEntries {
-                return appendingColophonIfNeeded(to: pages, settings: settings, workTitle: document.title)
+                return appendingColophonIfNeeded(
+                    to: pages,
+                    hasColophonPlaceholder: segments.contains(where: \.isColophonPlaceholder),
+                    settings: settings,
+                    workTitle: document.title
+                )
             }
 
             tableOfContentsEntries = updatedEntries
-            pages = paginate(segments, settings: settings, tableOfContentsEntries: tableOfContentsEntries)
+            pages = paginate(
+                segments,
+                settings: settings,
+                workTitle: document.title,
+                tableOfContentsEntries: tableOfContentsEntries
+            )
         }
 
-        return appendingColophonIfNeeded(to: pages, settings: settings, workTitle: document.title)
+        return appendingColophonIfNeeded(
+            to: pages,
+            hasColophonPlaceholder: segments.contains(where: \.isColophonPlaceholder),
+            settings: settings,
+            workTitle: document.title
+        )
     }
 
     private static func normalizedSegments(
@@ -116,6 +142,7 @@ enum ManuscriptPaginator {
     private static func paginate(
         _ segments: [ParsedManuscriptSegment],
         settings: EditorSettings,
+        workTitle: String,
         tableOfContentsEntries: [TableOfContentsEntry]
     ) -> [PreviewPage] {
         let maxLines = max(settings.linesPerPage, 1)
@@ -139,6 +166,17 @@ enum ManuscriptPaginator {
         }
 
         for (segmentIndex, segment) in segments.enumerated() {
+            if segment.isColophonPlaceholder {
+                if !currentLines.isEmpty {
+                    appendCurrentPage()
+                }
+                if let colophonPage = colophonPage(settings: settings, workTitle: workTitle) {
+                    pages.append(colophonPage)
+                }
+                currentStartsAfterPageBreak = true
+                continue
+            }
+
             let startsChapterPage = settings.startsChapterOnNewPage
                 && segment.startsChapter
                 && segmentIndex > 0
@@ -156,9 +194,12 @@ enum ManuscriptPaginator {
                 currentChapterStarts.append(chapterTitle)
             }
 
+            let text = previewText(for: segment, settings: settings, tableOfContentsEntries: tableOfContentsEntries)
             let lines = makeVerticalLines(
-                from: previewText(for: segment, settings: settings, tableOfContentsEntries: tableOfContentsEntries),
-                charactersPerLine: settings.charactersPerLine
+                from: text,
+                charactersPerLine: settings.charactersPerLine,
+                indentsParagraphs: !segment.isTableOfContentsPlaceholder,
+                indentExemptLines: indentExemptLines(for: segment, settings: settings)
             )
 
             for line in lines {
@@ -189,21 +230,28 @@ enum ManuscriptPaginator {
 
     private static func appendingColophonIfNeeded(
         to pages: [PreviewPage],
+        hasColophonPlaceholder: Bool,
         settings: EditorSettings,
         workTitle: String
     ) -> [PreviewPage] {
+        guard !hasColophonPlaceholder, let colophonPage = colophonPage(settings: settings, workTitle: workTitle) else {
+            return pages
+        }
+
+        return pages + [colophonPage]
+    }
+
+    private static func colophonPage(settings: EditorSettings, workTitle: String) -> PreviewPage? {
         var colophon = settings.colophon.validated
         colophon.workTitle = workTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard colophon.isEnabled else { return pages }
+        guard colophon.isEnabled else { return nil }
 
-        return pages + [
-            PreviewPage(
-                kind: .colophon(colophon),
-                columns: colophonColumns(from: colophon),
-                startsAfterPageBreak: false,
-                chapterTitle: nil
-            )
-        ]
+        return PreviewPage(
+            kind: .colophon(colophon),
+            columns: colophonColumns(from: colophon),
+            startsAfterPageBreak: false,
+            chapterTitle: nil
+        )
     }
 
     static func colophonColumns(from colophon: ColophonSettings) -> [String] {
@@ -353,36 +401,218 @@ enum ManuscriptPaginator {
         return String(repeating: "　", count: leadingSpaces) + formattedTitle
     }
 
-    private static func makeVerticalLines(from text: String, charactersPerLine: Int) -> [String] {
+    private static func makeVerticalLines(
+        from text: String,
+        charactersPerLine: Int,
+        indentsParagraphs: Bool,
+        indentExemptLines: Set<String>
+    ) -> [String] {
         let maxCharacters = max(charactersPerLine, 1)
         var lines: [String] = []
-        var currentLine = ""
 
-        for character in text {
-            if character == "\r" {
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = preparedParagraphLine(
+                rawLine,
+                indentsParagraphs: indentsParagraphs,
+                indentExemptLines: indentExemptLines
+            )
+            if line.isEmpty {
+                lines.append("")
                 continue
             }
 
-            if character == "\n" {
-                lines.append(currentLine)
-                currentLine = ""
-                continue
-            }
-
-            currentLine.append(character)
-
-            if currentLine.count >= maxCharacters {
-                lines.append(currentLine)
-                currentLine = ""
-            }
-        }
-
-        if !currentLine.isEmpty {
-            lines.append(currentLine)
+            lines.append(contentsOf: wrappedVerticalLines(from: line, maxCharacters: maxCharacters))
         }
 
         return lines.isEmpty ? [""] : lines
     }
+
+    private static func preparedParagraphLine(
+        _ line: String,
+        indentsParagraphs: Bool,
+        indentExemptLines: Set<String>
+    ) -> String {
+        let normalizedLine = line.replacingOccurrences(of: "\r", with: "")
+        let trimmedLine = normalizedLine.trimmingCharacters(in: .whitespaces)
+        guard indentsParagraphs,
+              !trimmedLine.isEmpty,
+              !indentExemptLines.contains(trimmedLine),
+              !normalizedLine.hasPrefix("　"),
+              !normalizedLine.hasPrefix("「"),
+              !normalizedLine.hasPrefix("『") else {
+            return normalizedLine
+        }
+
+        return "　" + normalizedLine
+    }
+
+    private static func indentExemptLines(
+        for segment: ParsedManuscriptSegment,
+        settings: EditorSettings
+    ) -> Set<String> {
+        guard let chapterTitle = segment.chapterTitle, segment.startsChapter else {
+            return []
+        }
+
+        return [formattedBodyChapterTitle(chapterTitle, settings: settings).trimmingCharacters(in: .whitespaces)]
+    }
+
+    private static func wrappedVerticalLines(from line: String, maxCharacters: Int) -> [String] {
+        let characters = line.map(String.init)
+        var wrappedLines: [String] = []
+        var index = 0
+
+        while index < characters.count {
+            var currentLine: [String] = []
+
+            while index < characters.count {
+                currentLine.append(characters[index])
+                index += 1
+
+                if cellCount(for: currentLine) > maxCharacters {
+                    index -= 1
+                    currentLine.removeLast()
+                    break
+                }
+
+                if cellCount(for: currentLine) >= maxCharacters {
+                    break
+                }
+            }
+
+            if index < characters.count {
+                if shouldMoveLastCharacterToNextLine(currentLine, nextCharacters: Array(characters[index...])) {
+                    index -= 1
+                    currentLine.removeLast()
+                } else {
+                    appendHangingCharacters(
+                        to: &currentLine,
+                        from: characters,
+                        index: &index
+                    )
+                }
+            }
+
+            if currentLine.isEmpty, index < characters.count {
+                currentLine.append(characters[index])
+                index += 1
+            }
+
+            wrappedLines.append(currentLine.joined())
+        }
+
+        return wrappedLines
+    }
+
+    private static func cellCount(for characters: [String]) -> Int {
+        var count = 0
+        var index = 0
+
+        while index < characters.count {
+            if isEllipsis(characters[index]) {
+                count += 1
+                index += 1
+                while characters.indices.contains(index), isEllipsis(characters[index]) {
+                    index += 1
+                }
+            } else if isPunctuation(characters[index]),
+               characters.indices.contains(index + 1),
+               isClosingQuote(characters[index + 1]) {
+                count += 1
+                index += 2
+            } else {
+                count += 1
+                index += 1
+            }
+        }
+
+        return count
+    }
+
+    private static func shouldMoveLastCharacterToNextLine(
+        _ currentLine: [String],
+        nextCharacters: [String]
+    ) -> Bool {
+        guard currentLine.count > 1 else { return false }
+
+        if isLineEndProhibited(currentLine.last) {
+            return true
+        }
+
+        guard let nextCharacter = nextCharacters.first,
+              isPunctuation(nextCharacter),
+              nextCharacters.indices.contains(1),
+              isClosingQuote(nextCharacters[1]) else {
+            return false
+        }
+
+        return true
+    }
+
+    private static func appendHangingCharacters(
+        to currentLine: inout [String],
+        from characters: [String],
+        index: inout Int
+    ) {
+        while index < characters.count {
+            let nextCharacter = characters[index]
+
+            if isLineStartProhibited(nextCharacter)
+                || formsNonBreakingPair(currentLine.last, nextCharacter) {
+                currentLine.append(nextCharacter)
+                index += 1
+            } else {
+                break
+            }
+        }
+    }
+
+    private static func isLineStartProhibited(_ character: String?) -> Bool {
+        guard let character else { return false }
+        return lineStartProhibitedCharacters.contains(character)
+    }
+
+    private static func isLineEndProhibited(_ character: String?) -> Bool {
+        guard let character else { return false }
+        return lineEndProhibitedCharacters.contains(character)
+    }
+
+    private static func formsNonBreakingPair(_ first: String?, _ second: String) -> Bool {
+        guard let first else { return false }
+        return nonBreakingPairs.contains(first + second)
+    }
+
+    private static func isPunctuation(_ character: String) -> Bool {
+        punctuationCharacters.contains(character)
+    }
+
+    private static func isClosingQuote(_ character: String) -> Bool {
+        ["」", "』"].contains(character)
+    }
+
+    private static func isEllipsis(_ character: String) -> Bool {
+        ["…", "‥"].contains(character)
+    }
+
+    private static let punctuationCharacters: Set<String> = [
+        "、", "。", "，", "．", "､", "｡"
+    ]
+
+    private static let lineStartProhibitedCharacters: Set<String> = [
+        "、", "。", "，", "．", "・", "：", "；", "！", "？",
+        "」", "』", "）", "】", "》", "〉", "］", "｝",
+        "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ",
+        "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ",
+        "ー", "々", "ゝ", "ゞ"
+    ]
+
+    private static let lineEndProhibitedCharacters: Set<String> = [
+        "「", "『", "（", "【", "《", "〈", "［", "｛"
+    ]
+
+    private static let nonBreakingPairs: Set<String> = [
+        "……", "――", "——", "！？", "？！", "!!", "??", "!?", "?!"
+    ]
 }
 
 struct TableOfContentsEntry: Equatable {
@@ -410,6 +640,10 @@ final class PreviewViewModel: ObservableObject {
 
     var subscriptionStatus: SubscriptionStatus {
         documentStore.subscriptionStatus
+    }
+
+    var isAdditionalFontPackUnlocked: Bool {
+        documentStore.isAdditionalFontPackUnlocked
     }
 
     func layout(for pageNumber: Int) -> PageLayout {

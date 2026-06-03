@@ -95,8 +95,7 @@ struct ColophonSettingsView: View {
             Toggle("サークルロゴを使用", isOn: circleImageUsageBinding)
 
             if !isPaid {
-                Image(systemName: "lock.fill")
-                    .foregroundStyle(.secondary)
+                paidFeatureBadge
                     .accessibilityLabel("有料コンテンツ")
             }
         }
@@ -134,7 +133,10 @@ struct ColophonSettingsView: View {
             Button {
                 showsPaidFeatureAlert = true
             } label: {
-                Label("サークルロゴ画像をインポート", systemImage: "lock.fill")
+                HStack {
+                    Text("サークルロゴ画像をインポート")
+                    paidFeatureBadge
+                }
             }
         }
     }
@@ -208,5 +210,14 @@ struct ColophonSettingsView: View {
         viewModel.updateColophon { colophon in
             colophon[keyPath: keyPath] = nil
         }
+    }
+
+    private var paidFeatureBadge: some View {
+        Text("有料")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.blue, in: Capsule())
     }
 }

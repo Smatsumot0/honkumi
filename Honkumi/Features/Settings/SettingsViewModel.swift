@@ -55,6 +55,10 @@ final class SettingsViewModel: ObservableObject {
         subscriptionStatus == .paid
     }
 
+    var isAdditionalFontPackUnlocked: Bool {
+        documentStore.isAdditionalFontPackUnlocked
+    }
+
     var isActiveWorkScope: Bool {
         scope == .activeWork
     }
@@ -65,9 +69,9 @@ final class SettingsViewModel: ObservableObject {
         settings = updated
     }
 
-    func updateJapaneseFont(_ value: JapaneseFont) {
+    func updateSelectedFontId(_ value: String) {
         var updated = settings
-        updated.japaneseFont = value
+        updated.selectedFontId = value
         settings = updated
     }
 
@@ -162,9 +166,12 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func updateFormatSettings(_ changes: (inout FormatSettings) -> Void) {
+        let previousSettings = settings
         var updated = settings
         changes(&updated.formatSettings)
         settings = updated
+
+        applyFormatIfAutoFormatWasEnabled(previousSettings: previousSettings, updatedSettings: updated)
     }
 
     func updateFormatRule(_ keyPath: WritableKeyPath<FormatSettings, Bool>, isEnabled: Bool) {
@@ -173,17 +180,21 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
-    func applyFormatToCurrentBody() -> Bool {
-        guard isActiveWorkScope else { return false }
+    private func applyFormatIfAutoFormatWasEnabled(
+        previousSettings: EditorSettings,
+        updatedSettings: EditorSettings
+    ) {
+        guard scope == .activeWork else { return }
+        guard !previousSettings.formatSettings.enableAutoFormat,
+              updatedSettings.formatSettings.enableAutoFormat else { return }
 
         let formattedBody = ManuscriptFormatter.formatManuscriptText(
             document.body,
-            settings: settings.formatSettings,
+            settings: updatedSettings.validated.formatSettings,
             options: FormatOptions(isPremiumUser: isPremiumUser)
         )
-        guard formattedBody != document.body else { return false }
+        guard formattedBody != document.body else { return }
 
-        documentStore.updateBody(formattedBody, recordsUndoSnapshot: true)
-        return true
+        documentStore.updateBody(formattedBody)
     }
 }

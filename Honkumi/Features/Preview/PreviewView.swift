@@ -4,44 +4,78 @@ import UIKit
 
 struct PreviewView: View {
     @StateObject var viewModel: PreviewViewModel
-    @State private var pageScale: CGFloat = 1
-    @State private var gestureScale: CGFloat = 1
+    @Binding var pageScale: CGFloat
+    @Binding var focusedPage: Int
+    @Binding var horizontalAnchor: CGFloat
+    @Binding var scrollOffset: CGPoint
+    @State private var restoresScrollPosition = true
 
     private var pagePreviewScale: CGFloat {
-        PreviewStyle.basePageScale * pageScale * gestureScale
+        PreviewStyle.basePageScale
     }
 
     var body: some View {
         let pages = viewModel.pages
 
-        ScrollView([.vertical, .horizontal]) {
-            LazyVStack(spacing: 20) {
-                ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
-                    VStack(spacing: 8) {
-                        if page.startsAfterPageBreak {
-                            pageBreakLabel
-                        }
+        ZoomablePreviewScrollView(
+            zoomScale: $pageScale,
+            contentOffset: $scrollOffset,
+            minimumZoomScale: PreviewStyle.pageScaleRange.lowerBound,
+            maximumZoomScale: PreviewStyle.pageScaleRange.upperBound
+        ) {
+            ZStack(alignment: .topLeading) {
+                Color(.systemGroupedBackground)
 
-                        pageCard(page, pageNumber: index + 1, totalPageCount: pages.count)
+                LazyVStack(spacing: 20) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                        VStack(spacing: 8) {
+                            if page.startsAfterPageBreak {
+                                pageBreakLabel
+                            }
+
+                            pageCard(page, pageNumber: index + 1, totalPageCount: pages.count)
+                        }
+                        .id(index + 1)
+                        .background(pagePositionReader(pageNumber: index + 1))
                     }
                 }
+                .padding()
             }
-            .padding()
-            .frame(maxWidth: .infinity)
+            .frame(minWidth: 1, minHeight: 1, alignment: .top)
+            .coordinateSpace(name: PreviewStyle.scrollCoordinateSpaceName)
         }
         .background(Color(.systemGroupedBackground))
-        .gesture(zoomGesture)
+        .onAppear {
+            restoresScrollPosition = false
+        }
+        .onChange(of: pages.count) { _, count in
+            focusedPage = min(max(focusedPage, 1), max(count, 1))
+        }
+        .onPreferenceChange(PreviewPagePositionPreferenceKey.self) { positions in
+            guard !restoresScrollPosition,
+                  let focusedPosition = positions.min(by: { abs($0.value.frame.minY) < abs($1.value.frame.minY) }) else {
+                return
+            }
+            let focused = focusedPosition.key
+            let frame = focusedPosition.value.frame
+            focusedPage = focused
+            if frame.width > 1 {
+                horizontalAnchor = (-frame.minX / frame.width).clamped(to: 0...1)
+            }
+        }
     }
 
-    private var zoomGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                gestureScale = value
-            }
-            .onEnded { value in
-                pageScale = (pageScale * value).clamped(to: PreviewStyle.pageScaleRange)
-                gestureScale = 1
-            }
+    private func pagePositionReader(pageNumber: Int) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: PreviewPagePositionPreferenceKey.self,
+                value: [
+                    pageNumber: PreviewPagePosition(
+                        frame: proxy.frame(in: .named(PreviewStyle.scrollCoordinateSpaceName))
+                    )
+                ]
+            )
+        }
     }
 
     private var pageBreakLabel: some View {
@@ -151,7 +185,11 @@ struct PreviewView: View {
                 }
             }
         }
-        .font(.system(size: max(layout.fontSize * pagePreviewScale, 7)))
+        .font(AppFontCatalog.swiftUIFont(
+            selectedFontId: layout.settings.selectedFontId,
+            size: max(layout.fontSize * pagePreviewScale, 7),
+            isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked
+        ))
         .frame(
             width: layout.bodyFrame.width * pagePreviewScale,
             height: layout.bodyFrame.height * pagePreviewScale,
@@ -495,32 +533,145 @@ struct PreviewView: View {
         let columnWidth = layout.lineAdvance * pagePreviewScale
         let rowHeight = layout.characterAdvance * pagePreviewScale
         let visibleFontSize = layout.fontSize * pagePreviewScale
+        let bodyHeight = layout.bodyFrame.height * pagePreviewScale
 
         return HStack(alignment: .top, spacing: 0) {
             ForEach((0..<lineCount).reversed(), id: \.self) { displayIndex in
                 let column = columns.indices.contains(displayIndex) ? columns[displayIndex] : ""
+                let cells = verticalCells(from: column, characterCount: characterCount)
+                let adjustedRowAdvance = adjustedCharacterAdvance(
+                    cellCount: cells.count,
+                    characterCount: characterCount,
+                    bodyHeight: bodyHeight,
+                    rowHeight: rowHeight
+                )
 
-                VStack(spacing: 0) {
-                    ForEach(0..<characterCount, id: \.self) { rowIndex in
-                        let glyph = verticalGlyph(for: character(at: rowIndex, in: column))
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: 0) {
+                        ForEach(0..<characterCount, id: \.self) { _ in
+                            Color.clear
+                                .frame(width: columnWidth, height: rowHeight)
+                                .border(PreviewStyle.gridLineColor, width: PreviewStyle.gridLineWidth)
+                        }
+                    }
 
-                        Text(glyph.text)
-                            .font(.custom(layout.settings.japaneseFont.postScriptName, size: visibleFontSize * glyph.fontScale))
-                            .rotationEffect(.degrees(glyph.rotationDegrees))
-                            .offset(x: glyph.xOffset * columnWidth, y: glyph.yOffset * rowHeight)
-                            .frame(width: columnWidth, height: rowHeight)
-                            .border(PreviewStyle.gridLineColor, width: PreviewStyle.gridLineWidth)
+                    ForEach(Array(cells.enumerated()), id: \.offset) { rowIndex, characters in
+                        verticalCell(
+                            characters: characters,
+                            selectedFontId: layout.settings.selectedFontId,
+                            fontSize: visibleFontSize,
+                            columnWidth: columnWidth,
+                            rowHeight: rowHeight
+                        )
+                        .offset(y: CGFloat(rowIndex) * adjustedRowAdvance)
                     }
                 }
-                .frame(width: columnWidth, height: layout.bodyFrame.height * pagePreviewScale, alignment: .top)
+                .frame(width: columnWidth, height: bodyHeight, alignment: .top)
             }
         }
     }
 
-    private func character(at index: Int, in column: String) -> String {
-        guard index < column.count else { return "" }
-        let stringIndex = column.index(column.startIndex, offsetBy: index)
-        return String(column[stringIndex])
+    private func adjustedCharacterAdvance(
+        cellCount: Int,
+        characterCount: Int,
+        bodyHeight: CGFloat,
+        rowHeight: CGFloat
+    ) -> CGFloat {
+        guard cellCount > 1 else { return rowHeight }
+        guard cellCount > characterCount || cellCount >= characterCount - 2 else {
+            return rowHeight
+        }
+
+        return max((bodyHeight - rowHeight) / CGFloat(cellCount - 1), 1)
+    }
+
+    private func verticalCell(
+        characters: [String],
+        selectedFontId: String,
+        fontSize: CGFloat,
+        columnWidth: CGFloat,
+        rowHeight: CGFloat
+    ) -> some View {
+        ZStack {
+            ForEach(Array(characters.enumerated()), id: \.offset) { index, character in
+                let glyph = verticalGlyph(for: character)
+
+                Text(glyph.text)
+                    .font(AppFontCatalog.swiftUIFont(
+                        selectedFontId: selectedFontId,
+                        size: fontSize * glyph.fontScale,
+                        isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked
+                    ))
+                    .rotationEffect(.degrees(glyph.rotationDegrees))
+                    .offset(glyphOffset(
+                        glyph: glyph,
+                        character: character,
+                        characters: characters,
+                        index: index,
+                        columnWidth: columnWidth,
+                        rowHeight: rowHeight
+                    ))
+            }
+        }
+        .frame(width: columnWidth, height: rowHeight)
+    }
+
+    private func glyphOffset(
+        glyph: VerticalGlyph,
+        character: String,
+        characters: [String],
+        index: Int,
+        columnWidth: CGFloat,
+        rowHeight: CGFloat
+    ) -> CGSize {
+        let normalized: CGPoint
+
+        if index > 0, glyph.isPunctuation, characters.first.map(isPunctuation) == false {
+            normalized = CGPoint(x: glyph.xOffset, y: 0.38)
+        } else if index > 0, isClosingQuote(character), characters.first.map(isPunctuation) == false {
+            normalized = CGPoint(x: -0.02, y: 0.34)
+        } else if index > 0, isClosingQuote(character), characters.first.map(isPunctuation) == true {
+            normalized = CGPoint(x: -0.02, y: 0.34)
+        } else {
+            normalized = CGPoint(
+                x: glyph.xOffset,
+                y: glyph.yOffset + overflowYOffset(index: index, glyph: glyph)
+            )
+        }
+
+        return CGSize(width: normalized.x * columnWidth, height: normalized.y * rowHeight)
+    }
+
+    private func verticalCells(from column: String, characterCount: Int) -> [[String]] {
+        let characters = column.map(String.init)
+        var cells: [[String]] = []
+        var index = 0
+
+        while index < characters.count {
+            let character = characters[index]
+            if isEllipsis(character) {
+                cells.append([character])
+                index += 1
+                while characters.indices.contains(index), isEllipsis(characters[index]) {
+                    index += 1
+                }
+            } else if isPunctuation(character),
+               characters.indices.contains(index + 1),
+               isClosingQuote(characters[index + 1]) {
+                cells.append([character, characters[index + 1]])
+                index += 2
+            } else {
+                cells.append([character])
+                index += 1
+            }
+        }
+
+        return cells
+    }
+
+    private func overflowYOffset(index: Int, glyph: VerticalGlyph) -> CGFloat {
+        guard index > 0 else { return 0 }
+        return glyph.isPunctuation ? 0.38 : -0.18 * CGFloat(index)
     }
 
     private func verticalGlyph(for character: String) -> VerticalGlyph {
@@ -564,12 +715,34 @@ struct PreviewView: View {
         case "…", "‥":
             VerticalGlyph("⋯", rotationDegrees: 90)
         case "、", "。", "､", "｡", "，", "．":
-            VerticalGlyph(character, fontScale: 0.78, xOffset: 0.24, yOffset: -0.26)
+            VerticalGlyph(character, fontScale: 0.66, xOffset: 0.38, yOffset: -0.40, isPunctuation: true)
+        case "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ",
+             "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ":
+            VerticalGlyph(character, fontScale: 0.74, xOffset: 0.30, yOffset: -0.32)
         case "―", "─", "—", "ｰ", "ー":
-            VerticalGlyph("｜")
+            VerticalGlyph("｜", fontScale: 0.78)
         default:
             VerticalGlyph(character)
         }
+    }
+
+    private func isEllipsis(_ character: String) -> Bool {
+        ["…", "‥"].contains(character)
+    }
+
+    private func isPunctuation(_ character: String) -> Bool {
+        ["、", "。", "､", "｡", "，", "．"].contains(character)
+    }
+
+    private func isClosingQuote(_ character: String) -> Bool {
+        ["」", "』"].contains(character)
+    }
+
+    private func isLineStartProhibited(_ character: String) -> Bool {
+        [
+            "、", "。", "，", "．", "・", "：", "；", "！", "？",
+            "」", "』", "）", "】", "》", "〉", "］", "｝"
+        ].contains(character)
     }
 
     private func marginGuide(_ layout: PageLayout) -> some View {
@@ -590,6 +763,7 @@ struct PreviewView: View {
 
 private enum PreviewStyle {
     static let basePageScale: CGFloat = 0.7
+    static let scrollCoordinateSpaceName = "previewScroll"
     static let pageScaleRange: ClosedRange<CGFloat> = 1...3.2
     static let gridLineColor = Color(hex: 0xEAEAEA).opacity(0.28)
     static let gridLineWidth: CGFloat = 0.5
@@ -622,25 +796,169 @@ private struct VerticalHorizontalColophonMetrics {
     let fontSize: CGFloat
 }
 
+private struct ZoomablePreviewScrollView<Content: View>: UIViewRepresentable {
+    @Binding var zoomScale: CGFloat
+    @Binding var contentOffset: CGPoint
+
+    let minimumZoomScale: CGFloat
+    let maximumZoomScale: CGFloat
+    @ViewBuilder let content: () -> Content
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.backgroundColor = .systemGroupedBackground
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = minimumZoomScale
+        scrollView.maximumZoomScale = maximumZoomScale
+        scrollView.zoomScale = zoomScale.clamped(to: minimumZoomScale...maximumZoomScale)
+        scrollView.bouncesZoom = true
+        scrollView.delaysContentTouches = false
+        scrollView.showsHorizontalScrollIndicator = true
+        scrollView.showsVerticalScrollIndicator = true
+
+        let hostedView = context.coordinator.hostingController.view!
+        hostedView.backgroundColor = .clear
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(hostedView)
+
+        NSLayoutConstraint.activate([
+            hostedView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            hostedView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            hostedView.widthAnchor.constraint(greaterThanOrEqualTo: scrollView.frameLayoutGuide.widthAnchor),
+            hostedView.heightAnchor.constraint(greaterThanOrEqualTo: scrollView.frameLayoutGuide.heightAnchor)
+        ])
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.hostingController.rootView = AnyView(content())
+        scrollView.minimumZoomScale = minimumZoomScale
+        scrollView.maximumZoomScale = maximumZoomScale
+
+        let clampedZoomScale = zoomScale.clamped(to: minimumZoomScale...maximumZoomScale)
+        if !scrollView.isTracking,
+           !scrollView.isZooming,
+           abs(scrollView.zoomScale - clampedZoomScale) > 0.001 {
+            scrollView.setZoomScale(clampedZoomScale, animated: false)
+        }
+
+        guard !context.coordinator.didRestoreInitialOffset else { return }
+        context.coordinator.didRestoreInitialOffset = true
+        DispatchQueue.main.async {
+            let maxOffset = CGPoint(
+                x: max(scrollView.contentSize.width - scrollView.bounds.width, 0),
+                y: max(scrollView.contentSize.height - scrollView.bounds.height, 0)
+            )
+            let restoredOffset = CGPoint(
+                x: contentOffset.x.clamped(to: 0...maxOffset.x),
+                y: contentOffset.y.clamped(to: 0...maxOffset.y)
+            )
+            scrollView.setContentOffset(restoredOffset, animated: false)
+        }
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        var parent: ZoomablePreviewScrollView
+        let hostingController: UIHostingController<AnyView>
+        var didRestoreInitialOffset = false
+
+        init(parent: ZoomablePreviewScrollView) {
+            self.parent = parent
+            self.hostingController = UIHostingController(rootView: AnyView(parent.content()))
+            super.init()
+        }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            hostingController.view
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            _ = scrollView
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard !scrollView.isTracking,
+                  !scrollView.isDragging,
+                  !scrollView.isDecelerating,
+                  !scrollView.isZooming else {
+                return
+            }
+            updateBindings(from: scrollView)
+        }
+
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            updateBindings(from: scrollView)
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate {
+                updateBindings(from: scrollView)
+            }
+        }
+
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            updateBindings(from: scrollView)
+        }
+
+        private func updateBindings(from scrollView: UIScrollView) {
+            let currentZoomScale = scrollView.zoomScale.clamped(
+                to: parent.minimumZoomScale...parent.maximumZoomScale
+            )
+            if abs(parent.zoomScale - currentZoomScale) > 0.001 {
+                parent.zoomScale = currentZoomScale
+            }
+
+            let currentOffset = scrollView.contentOffset
+            if abs(parent.contentOffset.x - currentOffset.x) > 0.5
+                || abs(parent.contentOffset.y - currentOffset.y) > 0.5 {
+                parent.contentOffset = currentOffset
+            }
+        }
+    }
+}
+
 private struct VerticalGlyph: Equatable {
     let text: String
     let rotationDegrees: Double
     let fontScale: CGFloat
     let xOffset: CGFloat
     let yOffset: CGFloat
+    let isPunctuation: Bool
 
     init(
         _ text: String,
         rotationDegrees: Double = 0,
         fontScale: CGFloat = 1,
         xOffset: CGFloat = 0,
-        yOffset: CGFloat = 0
+        yOffset: CGFloat = 0,
+        isPunctuation: Bool = false
     ) {
         self.text = text
         self.rotationDegrees = rotationDegrees
         self.fontScale = fontScale
         self.xOffset = xOffset
         self.yOffset = yOffset
+        self.isPunctuation = isPunctuation
+    }
+}
+
+private struct PreviewPagePosition: Equatable {
+    let frame: CGRect
+}
+
+private struct PreviewPagePositionPreferenceKey: PreferenceKey {
+    static var defaultValue: [Int: PreviewPagePosition] = [:]
+
+    static func reduce(value: inout [Int: PreviewPagePosition], nextValue: () -> [Int: PreviewPagePosition]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
 }
 

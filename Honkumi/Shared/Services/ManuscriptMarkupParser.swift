@@ -3,6 +3,7 @@ import Foundation
 enum ManuscriptMarkupParser {
     static let pageBreakTag = "[[PAGE_BREAK]]"
     static let tableOfContentsTag = "[[toc]]"
+    static let colophonTag = "[[colophon]]"
     static let chapterTagPrefix = "[[CHAPTER:"
     static let chapterTagSuffix = "]]"
 
@@ -60,6 +61,30 @@ enum ManuscriptMarkupParser {
                     didUseTableOfContentsTag = true
                     startsAfterPageBreak = false
                 }
+                continue
+            }
+
+            if remainingLine.trimmingCharacters(in: .whitespacesAndNewlines) == colophonTag {
+                if !currentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    appendSegment(
+                        text: currentText,
+                        chapterTitle: currentChapterTitle,
+                        startsChapter: startsChapter,
+                        startsAfterPageBreak: startsAfterPageBreak,
+                        to: &segments
+                    )
+                    startsChapter = false
+                    startsAfterPageBreak = false
+                }
+
+                currentText = ""
+                segments.append(ParsedManuscriptSegment(
+                    text: "",
+                    chapterTitle: nil,
+                    startsAfterPageBreak: startsAfterPageBreak,
+                    isColophonPlaceholder: true
+                ))
+                startsAfterPageBreak = false
                 continue
             }
 
@@ -123,6 +148,10 @@ enum ManuscriptMarkupParser {
                 continue
             }
 
+            if lineWithoutPageBreaks.trimmingCharacters(in: .whitespacesAndNewlines) == colophonTag {
+                continue
+            }
+
             if let chapterTitle = chapterTitle(from: lineWithoutPageBreaks) {
                 countedLines.append(chapterTitle)
             } else {
@@ -162,7 +191,8 @@ enum ManuscriptMarkupParser {
                 chapterTitle: chapterTitle,
                 startsChapter: startsChapter,
                 startsAfterPageBreak: startsAfterPageBreak,
-                isTableOfContentsPlaceholder: false
+                isTableOfContentsPlaceholder: false,
+                isColophonPlaceholder: false
             ))
         }
     }
@@ -178,18 +208,21 @@ struct ParsedManuscriptSegment: Equatable {
     let startsChapter: Bool
     let startsAfterPageBreak: Bool
     let isTableOfContentsPlaceholder: Bool
+    let isColophonPlaceholder: Bool
 
     init(
         text: String,
         chapterTitle: String?,
         startsChapter: Bool = false,
         startsAfterPageBreak: Bool,
-        isTableOfContentsPlaceholder: Bool = false
+        isTableOfContentsPlaceholder: Bool = false,
+        isColophonPlaceholder: Bool = false
     ) {
         self.text = text
         self.chapterTitle = chapterTitle
         self.startsChapter = startsChapter
         self.startsAfterPageBreak = startsAfterPageBreak
         self.isTableOfContentsPlaceholder = isTableOfContentsPlaceholder
+        self.isColophonPlaceholder = isColophonPlaceholder
     }
 }
