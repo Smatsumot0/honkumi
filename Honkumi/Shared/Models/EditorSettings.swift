@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-struct EditorSettings: Codable, Equatable {
+nonisolated struct EditorSettings: Codable, Equatable {
     static let fontSizeRange: ClosedRange<CGFloat> = 8...14
     static let charactersPerLineRange: ClosedRange<Int> = 25...45
     static let linesPerPageRange: ClosedRange<Int> = 10...24
@@ -12,6 +12,7 @@ struct EditorSettings: Codable, Equatable {
     static let lineSpacingRange: ClosedRange<CGFloat> = 0...8
     static let characterSpacingRange: ClosedRange<CGFloat> = 0...4
     static let maxConsecutiveBlankLinesRange: ClosedRange<Int> = 0...5
+    static let pageNumberSizeRange: ClosedRange<CGFloat> = 6...18
 
     var pageSize: PageSize
     var selectedFontId: String
@@ -24,6 +25,9 @@ struct EditorSettings: Codable, Equatable {
     var marginBottom: CGFloat
     var marginInner: CGFloat
     var marginOuter: CGFloat
+    var isPageNumberEnabled: Bool
+    var pageNumberFontId: String?
+    var pageNumberSize: CGFloat
     var pageNumberPosition: PageNumberPosition
     var showTableOfContents: Bool
     var showChapterTitle: Bool
@@ -44,6 +48,9 @@ struct EditorSettings: Codable, Equatable {
         marginBottom: CGFloat,
         marginInner: CGFloat,
         marginOuter: CGFloat,
+        isPageNumberEnabled: Bool,
+        pageNumberFontId: String?,
+        pageNumberSize: CGFloat,
         pageNumberPosition: PageNumberPosition,
         showTableOfContents: Bool,
         showChapterTitle: Bool,
@@ -63,6 +70,9 @@ struct EditorSettings: Codable, Equatable {
         self.marginBottom = marginBottom
         self.marginInner = marginInner
         self.marginOuter = marginOuter
+        self.isPageNumberEnabled = isPageNumberEnabled
+        self.pageNumberFontId = pageNumberFontId
+        self.pageNumberSize = pageNumberSize
         self.pageNumberPosition = pageNumberPosition
         self.showTableOfContents = showTableOfContents
         self.showChapterTitle = showChapterTitle
@@ -84,6 +94,9 @@ struct EditorSettings: Codable, Equatable {
         marginBottom: 15,
         marginInner: 10,
         marginOuter: 10,
+        isPageNumberEnabled: true,
+        pageNumberFontId: nil,
+        pageNumberSize: 7,
         pageNumberPosition: .center,
         showTableOfContents: false,
         showChapterTitle: false,
@@ -106,6 +119,9 @@ struct EditorSettings: Codable, Equatable {
             marginBottom: marginBottom.clamped(to: Self.marginBottomRange),
             marginInner: marginInner.clamped(to: Self.marginInnerRange),
             marginOuter: marginOuter.clamped(to: Self.marginOuterRange),
+            isPageNumberEnabled: isPageNumberEnabled,
+            pageNumberFontId: pageNumberFontId,
+            pageNumberSize: pageNumberSize.clamped(to: Self.pageNumberSizeRange),
             pageNumberPosition: pageNumberPosition,
             showTableOfContents: showTableOfContents,
             showChapterTitle: showChapterTitle,
@@ -117,7 +133,7 @@ struct EditorSettings: Codable, Equatable {
     }
 }
 
-extension EditorSettings {
+nonisolated extension EditorSettings {
     private enum CodingKeys: String, CodingKey {
         case pageSize
         case selectedFontId
@@ -131,6 +147,9 @@ extension EditorSettings {
         case marginBottom
         case marginInner
         case marginOuter
+        case isPageNumberEnabled
+        case pageNumberFontId
+        case pageNumberSize
         case pageNumberPosition
         case showTableOfContents
         case showChapterTitle
@@ -143,6 +162,11 @@ extension EditorSettings {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = EditorSettings.default
+
+        let decodedPageNumberPosition = try container.decodeIfPresent(PageNumberPosition.self, forKey: .pageNumberPosition)
+            ?? defaults.pageNumberPosition
+        let decodedIsPageNumberEnabled = try container.decodeIfPresent(Bool.self, forKey: .isPageNumberEnabled)
+            ?? (decodedPageNumberPosition != .hidden)
 
         self.init(
             pageSize: try container.decodeIfPresent(PageSize.self, forKey: .pageSize) ?? defaults.pageSize,
@@ -159,7 +183,10 @@ extension EditorSettings {
             marginBottom: try container.decodeIfPresent(CGFloat.self, forKey: .marginBottom) ?? defaults.marginBottom,
             marginInner: try container.decodeIfPresent(CGFloat.self, forKey: .marginInner) ?? defaults.marginInner,
             marginOuter: try container.decodeIfPresent(CGFloat.self, forKey: .marginOuter) ?? defaults.marginOuter,
-            pageNumberPosition: try container.decodeIfPresent(PageNumberPosition.self, forKey: .pageNumberPosition) ?? defaults.pageNumberPosition,
+            isPageNumberEnabled: decodedIsPageNumberEnabled,
+            pageNumberFontId: try container.decodeIfPresent(String.self, forKey: .pageNumberFontId),
+            pageNumberSize: try container.decodeIfPresent(CGFloat.self, forKey: .pageNumberSize) ?? defaults.pageNumberSize,
+            pageNumberPosition: decodedPageNumberPosition,
             showTableOfContents: try container.decodeIfPresent(Bool.self, forKey: .showTableOfContents) ?? defaults.showTableOfContents,
             showChapterTitle: try container.decodeIfPresent(Bool.self, forKey: .showChapterTitle) ?? defaults.showChapterTitle,
             chapterTitleStyle: try container.decodeIfPresent(ChapterTitleStyle.self, forKey: .chapterTitleStyle) ?? defaults.chapterTitleStyle,
@@ -182,6 +209,9 @@ extension EditorSettings {
         try container.encode(marginBottom, forKey: .marginBottom)
         try container.encode(marginInner, forKey: .marginInner)
         try container.encode(marginOuter, forKey: .marginOuter)
+        try container.encode(isPageNumberEnabled, forKey: .isPageNumberEnabled)
+        try container.encodeIfPresent(pageNumberFontId, forKey: .pageNumberFontId)
+        try container.encode(pageNumberSize, forKey: .pageNumberSize)
         try container.encode(pageNumberPosition, forKey: .pageNumberPosition)
         try container.encode(showTableOfContents, forKey: .showTableOfContents)
         try container.encode(showChapterTitle, forKey: .showChapterTitle)
@@ -205,7 +235,7 @@ extension EditorSettings {
     }
 }
 
-struct FormatSettings: Codable, Equatable {
+nonisolated struct FormatSettings: Codable, Equatable {
     var enableAutoFormat: Bool
     var enableIndent: Bool
     var skipIndentBeforeOpeningQuote: Bool
@@ -245,11 +275,11 @@ struct FormatSettings: Codable, Equatable {
     }
 }
 
-struct FormatOptions: Equatable {
+nonisolated struct FormatOptions: Equatable {
     var isPremiumUser: Bool
 }
 
-extension FormatSettings {
+nonisolated extension FormatSettings {
     private enum CodingKeys: String, CodingKey {
         case enableAutoFormat
         case enableIndent
@@ -288,7 +318,7 @@ extension FormatSettings {
     }
 }
 
-struct ColophonSettings: Codable, Equatable {
+nonisolated struct ColophonSettings: Codable, Equatable {
     var isEnabled: Bool
     var writingDirection: ColophonWritingDirection
     var workTitle: String
@@ -357,7 +387,7 @@ struct ColophonSettings: Codable, Equatable {
     }()
 }
 
-enum ColophonWritingDirection: String, Codable, CaseIterable, Identifiable {
+nonisolated enum ColophonWritingDirection: String, Codable, CaseIterable, Identifiable {
     case vertical
     case horizontal
 
@@ -373,7 +403,7 @@ enum ColophonWritingDirection: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-extension ColophonSettings {
+nonisolated extension ColophonSettings {
     var creatorImageData: [Data] {
         guard usesCircleImageForCreator, let circleImageData else { return [] }
         return [circleImageData]
@@ -447,13 +477,13 @@ extension ColophonSettings {
     }()
 }
 
-private extension String {
+nonisolated private extension String {
     var trimmedForStorage: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
-private extension Comparable {
+nonisolated private extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
     }

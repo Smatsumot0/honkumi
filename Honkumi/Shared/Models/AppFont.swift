@@ -2,7 +2,7 @@ import CoreText
 import SwiftUI
 import UIKit
 
-enum AppFontCategory: String, Codable, CaseIterable, Identifiable {
+nonisolated enum AppFontCategory: String, Codable, CaseIterable, Identifiable {
     case standard
     case novel
     case proofreading
@@ -21,7 +21,7 @@ enum AppFontCategory: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct AppFont: Identifiable, Equatable {
+nonisolated struct AppFont: Identifiable, Equatable {
     let id: String
     let displayName: String
     let postScriptName: String?
@@ -32,7 +32,39 @@ struct AppFont: Identifiable, Equatable {
     let copyrightText: String
 }
 
-enum AppFontCatalog {
+nonisolated enum PageNumberFontCategory: String, Codable, CaseIterable, Identifiable {
+    case romantic
+    case script
+    case handwriting
+    case pop
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .romantic:
+            "ハート・ロマンチック"
+        case .script:
+            "筆記体"
+        case .handwriting:
+            "手書き"
+        case .pop:
+            "ポップ"
+        }
+    }
+}
+
+nonisolated struct PageNumberFont: Identifiable, Equatable {
+    let id: String
+    let displayName: String
+    let postScriptName: String
+    let fileName: String
+    let category: PageNumberFontCategory
+    let licenseName: String
+    let copyrightText: String
+}
+
+nonisolated enum AppFontCatalog {
     static let defaultFontId = "biz-ud-mincho"
 
     static let all: [AppFont] = [
@@ -138,6 +170,81 @@ enum AppFontCatalog {
         )
     ]
 
+    static let pageNumberFonts: [PageNumberFont] = [
+        PageNumberFont(
+            id: "love-light",
+            displayName: "Love Light",
+            postScriptName: "LoveLight-Regular",
+            fileName: "LoveLight-Regular.ttf",
+            category: .romantic,
+            licenseName: "SIL Open Font License 1.1",
+            copyrightText: "Copyright 2003 The Love Light Project Authors (https://github.com/googlefonts/love-light)"
+        ),
+        PageNumberFont(
+            id: "dancing-script",
+            displayName: "Dancing Script",
+            postScriptName: "DancingScript-Regular",
+            fileName: "DancingScript-Regular.ttf",
+            category: .script,
+            licenseName: "SIL Open Font License 1.1",
+            copyrightText: "Copyright 2016 The Dancing Script Project Authors (https://github.com/googlefonts/DancingScript), with Reserved Font Name \"Dancing Script\"."
+        ),
+        PageNumberFont(
+            id: "pacifico",
+            displayName: "Pacifico",
+            postScriptName: "Pacifico-Regular",
+            fileName: "Pacifico-Regular.ttf",
+            category: .script,
+            licenseName: "SIL Open Font License 1.1",
+            copyrightText: "Copyright 2018 The Pacifico Project Authors (https://github.com/googlefonts/Pacifico)"
+        ),
+        PageNumberFont(
+            id: "great-vibes",
+            displayName: "Great Vibes",
+            postScriptName: "GreatVibes-Regular",
+            fileName: "GreatVibes-Regular.ttf",
+            category: .script,
+            licenseName: "SIL Open Font License 1.1",
+            copyrightText: "Copyright 2010 The Great Vibes Pro Project Authors (https://github.com/googlefonts/great-vibes)"
+        ),
+        PageNumberFont(
+            id: "caveat",
+            displayName: "Caveat",
+            postScriptName: "Caveat-Regular",
+            fileName: "Caveat-Regular.ttf",
+            category: .handwriting,
+            licenseName: "SIL Open Font License 1.1",
+            copyrightText: "Copyright 2014 The Caveat Project Authors (https://github.com/googlefonts/caveat)"
+        ),
+        PageNumberFont(
+            id: "homemade-apple",
+            displayName: "Homemade Apple",
+            postScriptName: "HomemadeApple-Regular",
+            fileName: "HomemadeApple-Regular.ttf",
+            category: .handwriting,
+            licenseName: "Apache License 2.0",
+            copyrightText: "Copyright (c) 2010 by Font Diner, Inc. All rights reserved."
+        ),
+        PageNumberFont(
+            id: "hachi-maru-pop",
+            displayName: "Hachi Maru Pop",
+            postScriptName: "HachiMaruPop-Regular",
+            fileName: "HachiMaruPop-Regular.ttf",
+            category: .handwriting,
+            licenseName: "SIL Open Font License 1.1",
+            copyrightText: "Copyright 2020 The Hachi Maru Pop Project Authors (https://github.com/noriokanisawa/HachiMaruPop)"
+        ),
+        PageNumberFont(
+            id: "cherry-bomb-one",
+            displayName: "Cherry Bomb One",
+            postScriptName: "CherryBombOne-Regular",
+            fileName: "CherryBombOne-Regular.ttf",
+            category: .pop,
+            licenseName: "SIL Open Font License 1.1",
+            copyrightText: "Copyright 2019 The Cherry Bomb Project Authors (https://github.com/satsuyako/CherryBomb)"
+        )
+    ]
+
     private static var registeredFontFiles = Set<String>()
 
     static func font(id: String) -> AppFont? {
@@ -146,6 +253,15 @@ enum AppFontCatalog {
 
     static func fonts(in category: AppFontCategory) -> [AppFont] {
         all.filter { $0.category == category }
+    }
+
+    static func pageNumberFonts(in category: PageNumberFontCategory) -> [PageNumberFont] {
+        pageNumberFonts.filter { $0.category == category }
+    }
+
+    static func pageNumberFont(id: String?) -> PageNumberFont? {
+        guard let id else { return nil }
+        return pageNumberFonts.first { $0.id == id }
     }
 
     static func effectiveFont(
@@ -205,21 +321,47 @@ enum AppFontCatalog {
         return .system(size: size)
     }
 
-    static func registerBundledFonts() {
-        for font in all {
-            guard let fileName = font.fileName,
-                  !registeredFontFiles.contains(fileName),
-                  let url = Bundle.main.url(forResource: fileName, withExtension: nil) else {
-                continue
-            }
+    static func pageNumberUIFont(
+        pageNumberFontId: String?,
+        bodyFontId: String,
+        size: CGFloat,
+        isPageNumberFontUnlocked: Bool
+    ) -> UIFont {
+        guard isPageNumberFontUnlocked,
+              let pageNumberFont = pageNumberFont(id: pageNumberFontId),
+              let uiFont = UIFont(name: pageNumberFont.postScriptName, size: size) else {
+            return uiFont(
+                selectedFontId: bodyFontId,
+                size: size,
+                isAdditionalFontPackUnlocked: true
+            )
+        }
 
-            var error: Unmanaged<CFError>?
-            if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
-                registeredFontFiles.insert(fileName)
-                debugPrint("Registered font file:", fileName)
-            } else if let error {
-                debugPrint("Failed to register font file:", fileName, error.takeRetainedValue())
-            }
+        return uiFont
+    }
+
+    static func pageNumberSwiftUIFont(
+        pageNumberFontId: String?,
+        bodyFontId: String,
+        size: CGFloat,
+        isPageNumberFontUnlocked: Bool
+    ) -> Font {
+        guard isPageNumberFontUnlocked,
+              let pageNumberFont = pageNumberFont(id: pageNumberFontId),
+              UIFont(name: pageNumberFont.postScriptName, size: size) != nil else {
+            return swiftUIFont(
+                selectedFontId: bodyFontId,
+                size: size,
+                isAdditionalFontPackUnlocked: true
+            )
+        }
+
+        return .custom(pageNumberFont.postScriptName, size: size)
+    }
+
+    static func registerBundledFonts() {
+        for fileName in all.compactMap(\.fileName) + pageNumberFonts.map(\.fileName) {
+            registerFont(fileName: fileName)
         }
 
         #if DEBUG
@@ -243,5 +385,20 @@ enum AppFontCatalog {
         }
 
         return false
+    }
+
+    private static func registerFont(fileName: String) {
+        guard !registeredFontFiles.contains(fileName),
+              let url = Bundle.main.url(forResource: fileName, withExtension: nil) else {
+            return
+        }
+
+        var error: Unmanaged<CFError>?
+        if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+            registeredFontFiles.insert(fileName)
+            debugPrint("Registered font file:", fileName)
+        } else if let error {
+            debugPrint("Failed to register font file:", fileName, error.takeRetainedValue())
+        }
     }
 }

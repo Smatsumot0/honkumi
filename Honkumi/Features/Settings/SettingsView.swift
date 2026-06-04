@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
     @State private var selectedTab: SettingsTab = .print
+    @State private var showsPageNumberDesignGuide = false
     private let settingTitleWidth: CGFloat = 112
     private let settingValueWidth: CGFloat = 72
 
@@ -193,23 +194,39 @@ struct SettingsView: View {
             }
 
             Section("ページ番号") {
-                if viewModel.subscriptionStatus == .paid {
-                    Picker("表示位置", selection: Binding(
-                        get: { viewModel.settings.pageNumberPosition },
-                        set: { viewModel.updatePageNumberPosition($0) }
-                    )) {
-                        ForEach(PageNumberPosition.allCases) { position in
-                            Text(position.displayName).tag(position)
-                        }
+                Toggle("ページ番号を表示", isOn: Binding(
+                    get: { viewModel.settings.isPageNumberEnabled },
+                    set: { viewModel.updateIsPageNumberEnabled($0) }
+                ))
+
+                pageNumberFontNavigationRow
+
+                valueStepper(
+                    title: "ノンブルサイズ",
+                    value: viewModel.settings.pageNumberSize,
+                    range: EditorSettings.pageNumberSizeRange,
+                    step: 0.5,
+                    format: "%.1f pt",
+                    update: viewModel.updatePageNumberSize
+                )
+                .disabled(!viewModel.isPageNumberFontUnlocked)
+
+                Picker("表示位置", selection: Binding(
+                    get: { viewModel.settings.pageNumberPosition == .hidden ? .outside : viewModel.settings.pageNumberPosition },
+                    set: { viewModel.updatePageNumberPosition($0) }
+                )) {
+                    ForEach(PageNumberPosition.allCases.filter { $0 != .hidden }) { position in
+                        Text(position.displayName).tag(position)
                     }
-                    .pickerStyle(.segmented)
-                } else {
-                    Toggle("ページ番号を表示", isOn: Binding(
-                        get: { viewModel.settings.pageNumberPosition != .hidden },
-                        set: { viewModel.updatePageNumberPosition($0 ? .outside : .hidden) }
-                    ))
                 }
+                .pickerStyle(.segmented)
+                .disabled(!viewModel.isPageNumberFontUnlocked || !viewModel.settings.isPageNumberEnabled)
             }
+        }
+        .alert("ノンブルデザイン設定", isPresented: $showsPageNumberDesignGuide) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("デザイン性の高いノンブル用フォント、サイズ、位置の変更は有料機能です。無料版では本文と同じフォントでページ番号のみを表示します。")
         }
     }
 
@@ -289,8 +306,112 @@ struct SettingsView: View {
         .navigationTitle("フォント設定")
     }
 
+    private var pageNumberFontSettingsView: some View {
+        Form {
+            Section("本文フォント") {
+                Button {
+                    viewModel.updatePageNumberFontId(nil)
+                } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("本文と同じ")
+                                .foregroundStyle(.primary)
+                            Text("無料版と同じシンプルなノンブル")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if viewModel.settings.pageNumberFontId == nil {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            ForEach(PageNumberFontCategory.allCases) { category in
+                Section(category.displayName) {
+                    ForEach(AppFontCatalog.pageNumberFonts(in: category)) { font in
+                        pageNumberFontRow(font)
+                    }
+                }
+            }
+
+            Section("フォントライセンス") {
+                ForEach(AppFontCatalog.pageNumberFonts) { font in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(font.displayName)
+                            .font(AppFontCatalog.pageNumberSwiftUIFont(
+                                pageNumberFontId: font.id,
+                                bodyFontId: viewModel.settings.selectedFontId,
+                                size: 17,
+                                isPageNumberFontUnlocked: true
+                            ))
+                        Text(font.licenseName)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(font.copyrightText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .navigationTitle("ノンブルフォント設定")
+    }
+
     private var currentFontDisplayName: String {
         AppFontCatalog.font(id: viewModel.settings.selectedFontId)?.displayName ?? "BIZ UD明朝"
+    }
+
+    private var currentPageNumberFontDisplayName: String {
+        guard viewModel.isPageNumberFontUnlocked else {
+            return "本文と同じ"
+        }
+
+        return AppFontCatalog.pageNumberFont(id: viewModel.settings.pageNumberFontId)?.displayName
+            ?? "本文と同じ"
+    }
+
+    @ViewBuilder
+    private var pageNumberFontNavigationRow: some View {
+        if viewModel.isPageNumberFontUnlocked {
+            NavigationLink {
+                pageNumberFontSettingsView
+            } label: {
+                HStack {
+                    Text("ノンブル用フォント")
+                    Spacer()
+                    Text(currentPageNumberFontDisplayName)
+                        .font(AppFontCatalog.pageNumberSwiftUIFont(
+                            pageNumberFontId: viewModel.settings.pageNumberFontId,
+                            bodyFontId: viewModel.settings.selectedFontId,
+                            size: 17,
+                            isPageNumberFontUnlocked: true
+                        ))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            Button {
+                showsPageNumberDesignGuide = true
+            } label: {
+                HStack {
+                    Text("ノンブル用フォント")
+                    Spacer()
+                    Text("本文と同じ")
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "lock.fill")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .foregroundStyle(.primary)
+        }
     }
 
     private func fontRow(_ font: AppFont) -> some View {
@@ -309,6 +430,49 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
 
                 Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.blue)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func pageNumberFontRow(_ font: PageNumberFont) -> some View {
+        let isSelected = viewModel.settings.pageNumberFontId == font.id
+
+        return Button {
+            viewModel.updatePageNumberFontId(font.id)
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(font.displayName)
+                        .font(AppFontCatalog.pageNumberSwiftUIFont(
+                            pageNumberFontId: font.id,
+                            bodyFontId: viewModel.settings.selectedFontId,
+                            size: 17,
+                            isPageNumberFontUnlocked: true
+                        ))
+                        .foregroundStyle(.primary)
+
+                    Text(font.category.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("0123456789")
+                    .font(AppFontCatalog.pageNumberSwiftUIFont(
+                        pageNumberFontId: font.id,
+                        bodyFontId: viewModel.settings.selectedFontId,
+                        size: 15,
+                        isPageNumberFontUnlocked: true
+                    ))
+                    .foregroundStyle(.secondary)
 
                 if isSelected {
                     Image(systemName: "checkmark")

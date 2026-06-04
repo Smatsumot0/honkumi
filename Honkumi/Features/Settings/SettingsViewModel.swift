@@ -59,6 +59,10 @@ final class SettingsViewModel: ObservableObject {
         documentStore.isAdditionalFontPackUnlocked
     }
 
+    var isPageNumberFontUnlocked: Bool {
+        documentStore.isPageNumberFontUnlocked
+    }
+
     var isActiveWorkScope: Bool {
         scope == .activeWork
     }
@@ -156,6 +160,30 @@ final class SettingsViewModel: ObservableObject {
     func updatePageNumberPosition(_ value: PageNumberPosition) {
         var updated = settings
         updated.pageNumberPosition = value
+        updated.isPageNumberEnabled = value != .hidden
+        settings = updated
+    }
+
+    func updateIsPageNumberEnabled(_ value: Bool) {
+        var updated = settings
+        updated.isPageNumberEnabled = value
+        if value, updated.pageNumberPosition == .hidden {
+            updated.pageNumberPosition = .outside
+        }
+        settings = updated
+    }
+
+    func updatePageNumberFontId(_ value: String?) {
+        guard isPageNumberFontUnlocked else { return }
+        var updated = settings
+        updated.pageNumberFontId = value
+        settings = updated
+    }
+
+    func updatePageNumberSize(_ value: CGFloat) {
+        guard isPageNumberFontUnlocked else { return }
+        var updated = settings
+        updated.pageNumberSize = value
         settings = updated
     }
 

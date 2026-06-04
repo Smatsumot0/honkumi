@@ -10,25 +10,32 @@ final class DocumentStore: ObservableObject {
     private let legacyStorageKey = "honkumi.currentDocument"
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var pendingSaveTask: Task<Void, Never>?
 
     init() {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
         let loadedData: AppData
+        let needsInitialSave: Bool
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let savedData = try? decoder.decode(AppData.self, from: data) {
             let migratedData = Self.migrate(savedData)
             loadedData = Self.normalized(migratedData)
+            needsInitialSave = loadedData != savedData
         } else if let legacyData = UserDefaults.standard.data(forKey: legacyStorageKey),
                   let legacyDocument = try? decoder.decode(ManuscriptDocument.self, from: legacyData) {
             loadedData = Self.migratedFromLegacyDocument(legacyDocument)
+            needsInitialSave = true
         } else {
             loadedData = .initial
+            needsInitialSave = false
         }
 
         self.appData = loadedData
         self.document = Self.activeDocument(in: loadedData)
-        save()
+        if needsInitialSave {
+            save()
+        }
     }
 
     init(appData: AppData) {
@@ -56,6 +63,10 @@ final class DocumentStore: ObservableObject {
     }
 
     var isAdditionalFontPackUnlocked: Bool {
+        appData.subscriptionStatus == .paid
+    }
+
+    var isPageNumberFontUnlocked: Bool {
         appData.subscriptionStatus == .paid
     }
 
@@ -192,12 +203,23 @@ final class DocumentStore: ObservableObject {
         updatedData = Self.normalized(Self.migrate(updatedData))
         appData = updatedData
         document = Self.activeDocument(in: updatedData)
-        save()
+        scheduleSave()
     }
 
     private func save() {
         guard let data = try? encoder.encode(appData) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private func scheduleSave() {
+        pendingSaveTask?.cancel()
+        pendingSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.save()
+            }
+        }
     }
 
     private static func migrate(_ data: AppData) -> AppData {
