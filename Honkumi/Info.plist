@@ -33,17 +33,25 @@
 	<array>
 		<string>BIZUDGothic-Regular.ttf</string>
 		<string>BIZUDMincho-Regular.ttf</string>
+		<string>Caveat-Regular.ttf</string>
+		<string>CherryBombOne-Regular.ttf</string>
+		<string>DancingScript-Regular.ttf</string>
+		<string>GreatVibes-Regular.ttf</string>
+		<string>HachiMaruPop-Regular.ttf</string>
+		<string>HomemadeApple-Regular.ttf</string>
 		<string>IBMPlexSansJP-Regular.ttf</string>
+		<string>LoveLight-Regular.ttf</string>
 		<string>MPLUS1-Regular.ttf</string>
 		<string>NotoSansJP-Regular.otf</string>
 		<string>NotoSerifJP-Regular.otf</string>
+		<string>Pacifico-Regular.ttf</string>
 		<string>ShipporiMincho-Regular.ttf</string>
 		<string>SourceHanSansJP-Regular.otf</string>
 		<string>SourceHanSerifJP-Regular.otf</string>
 		<string>ZenOldMincho-Regular.ttf</string>
 	</array>
-	<key>UILaunchScreen</key>
-	<dict/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleDefault</string>
 	<key>UISupportedInterfaceOrientations~ipad</key>
