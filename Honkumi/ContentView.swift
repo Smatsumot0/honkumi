@@ -20,7 +20,6 @@ struct ContentView: View {
                     presentedColophonScope = .userDefault
                 }
             )
-            .navigationTitle("作品")
             .navigationDestination(isPresented: $showsWorkspace) {
                 WorkspaceView(
                     documentStore: documentStore,
@@ -51,11 +50,31 @@ struct ContentView: View {
 private struct WorkspaceView: View {
     @ObservedObject var documentStore: DocumentStore
     @Binding var presentedSettingsScope: SettingsViewModel.Scope?
+    @StateObject private var editorViewModel: EditorViewModel
+    @StateObject private var previewViewModel: PreviewViewModel
     @State private var selectedSection: AppSection = .editor
+    @State private var editorScrollOffset: CGPoint = .zero
     @State private var previewPageScale: CGFloat = 1
     @State private var previewFocusedPage = 1
     @State private var previewHorizontalAnchor: CGFloat = 0.5
     @State private var previewScrollOffset: CGPoint = .zero
+    @State private var showsFacingPagesPreview = true
+    @State private var showsPreviewGuides = true
+    @State private var preflightResult: PreflightResult?
+    @State private var exportedPDF: ExportedPDF?
+    @State private var exportErrorMessage = ""
+    @State private var showsExportError = false
+    @State private var isExportingPDF = false
+
+    private let preflightService = PDFPreflightService()
+    private let pdfExportService = PDFExportService()
+
+    init(documentStore: DocumentStore, presentedSettingsScope: Binding<SettingsViewModel.Scope?>) {
+        self.documentStore = documentStore
+        self._presentedSettingsScope = presentedSettingsScope
+        self._editorViewModel = StateObject(wrappedValue: EditorViewModel(documentStore: documentStore))
+        self._previewViewModel = StateObject(wrappedValue: PreviewViewModel(documentStore: documentStore))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,31 +89,176 @@ private struct WorkspaceView: View {
             .padding(.vertical, 10)
             .background(.bar)
 
+            if selectedSection == .preview {
+                HStack {
+                    Button {
+                        showsPreviewGuides.toggle()
+                    } label: {
+                        Label("ガイド表示", systemImage: showsPreviewGuides ? "ruler.fill" : "ruler")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(showsPreviewGuides ? .accentColor : nil)
+                    .accessibilityLabel(showsPreviewGuides ? "ガイドを非表示" : "ガイドを表示")
+
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .background(.bar)
+            }
+
             Group {
                 switch selectedSection {
                 case .editor:
-                    EditorView(viewModel: EditorViewModel(documentStore: documentStore))
-                case .preview:
-                    PreviewView(
-                        viewModel: PreviewViewModel(documentStore: documentStore),
-                        pageScale: $previewPageScale,
-                        focusedPage: $previewFocusedPage,
-                        horizontalAnchor: $previewHorizontalAnchor,
-                        scrollOffset: $previewScrollOffset
+                    EditorView(
+                        viewModel: editorViewModel,
+                        scrollOffset: $editorScrollOffset
                     )
+                case .preview:
+                    ZStack {
+                        PreviewView(
+                            viewModel: previewViewModel,
+                            pageScale: $previewPageScale,
+                            focusedPage: $previewFocusedPage,
+                            horizontalAnchor: $previewHorizontalAnchor,
+                            scrollOffset: $previewScrollOffset,
+                            showsFacingPages: $showsFacingPagesPreview,
+                            showsGuides: $showsPreviewGuides
+                        )
+                    }
                 }
             }
         }
         .navigationTitle(documentStore.document.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if selectedSection == .preview {
+                    Button {
+                        runPreflightBeforeExport()
+                    } label: {
+                        if isExportingPDF {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(isExportingPDF)
+                    .accessibilityLabel("PDF出力")
+                }
+
                 Button {
                     presentedSettingsScope = .activeWork
                 } label: {
                     Image(systemName: "gearshape")
                 }
                 .accessibilityLabel("設定")
+            }
+        }
+        .sheet(item: $preflightResult) { result in
+            PreflightResultView(
+                result: result,
+                onReturnToFix: {
+                    preflightResult = result
+                    selectedSection = .editor
+                    preflightResult = nil
+                },
+                onAutoFixAndContinue: {
+                    autoFixAndContinue()
+                },
+                onIgnoreWarningsAndContinue: {
+                    guard result.canContinue else { return }
+                    preflightResult = nil
+                    exportPDF()
+                },
+                onCancel: {
+                    preflightResult = nil
+                }
+            )
+        }
+        .sheet(item: $exportedPDF) { exportedPDF in
+            PDFShareSheetView(exportedPDF: exportedPDF)
+        }
+        .alert("PDF出力に失敗しました", isPresented: $showsExportError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportErrorMessage)
+        }
+    }
+
+    private func runPreflightBeforeExport() {
+        guard !isExportingPDF else { return }
+        isExportingPDF = true
+
+        let document = documentStore.document
+        let subscriptionStatus = documentStore.subscriptionStatus
+        let preflightService = preflightService
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                preflightService.check(
+                    document: document,
+                    subscriptionStatus: subscriptionStatus
+                )
+            }.value
+
+            await MainActor.run {
+                if result.hasProblems {
+                    preflightResult = result
+                    isExportingPDF = false
+                } else {
+                    exportPDF(document: document, isAlreadyExporting: true)
+                }
+            }
+        }
+    }
+
+    private func autoFixAndContinue() {
+        let fixedDocument = preflightService.autoFixedDocument(
+            from: documentStore.document,
+            subscriptionStatus: documentStore.subscriptionStatus
+        )
+        documentStore.updateBody(fixedDocument.body)
+        documentStore.updateSettings(fixedDocument.settings)
+
+        let result = preflightService.check(
+            document: fixedDocument,
+            subscriptionStatus: documentStore.subscriptionStatus
+        )
+
+        if result.hasProblems {
+            preflightResult = result
+        } else {
+            preflightResult = nil
+            exportPDF(document: fixedDocument)
+        }
+    }
+
+    private func exportPDF(document: ManuscriptDocument? = nil, isAlreadyExporting: Bool = false) {
+        guard isAlreadyExporting || !isExportingPDF else { return }
+        if !isAlreadyExporting {
+            isExportingPDF = true
+        }
+
+        let exportDocument = document ?? documentStore.document
+        let subscriptionStatus = documentStore.subscriptionStatus
+
+        Task {
+            do {
+                let url = try await pdfExportService.export(
+                    document: exportDocument,
+                    subscriptionStatus: subscriptionStatus
+                )
+                await MainActor.run {
+                    exportedPDF = ExportedPDF(url: url)
+                    isExportingPDF = false
+                }
+            } catch {
+                await MainActor.run {
+                    exportErrorMessage = error.localizedDescription
+                    showsExportError = true
+                    isExportingPDF = false
+                }
             }
         }
     }

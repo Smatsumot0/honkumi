@@ -1,6 +1,6 @@
 import Foundation
 
-struct WorkCategory: Codable, Equatable, Identifiable {
+nonisolated struct WorkCategory: Codable, Equatable, Identifiable {
     static let uncategorizedId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     var id: UUID

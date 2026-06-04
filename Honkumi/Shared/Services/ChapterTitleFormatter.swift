@@ -1,6 +1,6 @@
 import Foundation
 
-enum ChapterTitleFormatter {
+nonisolated enum ChapterTitleFormatter {
     static func format(_ title: String, style: ChapterTitleStyle) -> String {
         switch style {
         case .plain, .centered:

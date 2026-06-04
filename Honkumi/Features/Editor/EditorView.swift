@@ -2,6 +2,7 @@ import SwiftUI
 
 struct EditorView: View {
     @StateObject var viewModel: EditorViewModel
+    @Binding var scrollOffset: CGPoint
     @State private var selectedRange = NSRange(location: 0, length: 0)
     @State private var requestedSelectedRange: NSRange?
     @State private var isBodyEditorActive = false
@@ -21,10 +22,21 @@ struct EditorView: View {
                 searchReplacePanel
             }
 
-            ManuscriptTextEditor(text: Binding(
-                get: { viewModel.body },
-                set: { viewModel.body = $0 }
-            ), selectedRange: $selectedRange, requestedSelectedRange: $requestedSelectedRange, isEditing: $isBodyEditorActive, command: $editorCommand, selectedFontId: viewModel.document.settings.selectedFontId, isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked, formatSettings: viewModel.formatSettings, formatOptions: viewModel.formatOptions)
+            ManuscriptTextEditor(
+                text: Binding(
+                    get: { viewModel.body },
+                    set: { viewModel.body = $0 }
+                ),
+                selectedRange: $selectedRange,
+                requestedSelectedRange: $requestedSelectedRange,
+                contentOffset: $scrollOffset,
+                isEditing: $isBodyEditorActive,
+                command: $editorCommand,
+                selectedFontId: viewModel.document.settings.selectedFontId,
+                isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked,
+                formatSettings: viewModel.formatSettings,
+                formatOptions: viewModel.formatOptions
+            )
             .padding(8)
             .overlay(alignment: .topLeading) {
                 if viewModel.body.isEmpty && !isBodyEditorActive {
@@ -142,6 +154,8 @@ struct EditorView: View {
                 insertionButton("「」", cursorOffsetFromEnd: 1)
                 insertionButton("（）", cursorOffsetFromEnd: 1)
                 insertionButton("…", inserts: "……")
+                insertionButton("〜")
+                insertionButton("─", inserts: "──")
                 insertionButton("ー", inserts: "ーー")
                 Button {
                     chapterTitle = ""

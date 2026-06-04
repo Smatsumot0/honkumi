@@ -1,6 +1,6 @@
 import Foundation
 
-enum JapaneseFont: String, Codable, CaseIterable, Identifiable {
+nonisolated enum JapaneseFont: String, Codable, CaseIterable, Identifiable {
     case hiraginoSans = "HiraginoSans-W3"
     case hiraginoSansBold = "HiraginoSans-W6"
     case hiraginoMincho = "HiraMinProN-W3"

@@ -3,11 +3,14 @@ import SwiftUI
 import UIKit
 
 struct PreviewView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject var viewModel: PreviewViewModel
     @Binding var pageScale: CGFloat
     @Binding var focusedPage: Int
     @Binding var horizontalAnchor: CGFloat
     @Binding var scrollOffset: CGPoint
+    @Binding var showsFacingPages: Bool
+    @Binding var showsGuides: Bool
     @State private var restoresScrollPosition = true
 
     private var pagePreviewScale: CGFloat {
@@ -24,75 +27,125 @@ struct PreviewView: View {
             maximumZoomScale: PreviewStyle.pageScaleRange.upperBound
         ) {
             ZStack(alignment: .topLeading) {
-                Color(.systemGroupedBackground)
+                PreviewStyle.canvasBackground(colorScheme)
 
-                LazyVStack(spacing: 20) {
-                    ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
-                        VStack(spacing: 8) {
-                            if page.startsAfterPageBreak {
-                                pageBreakLabel
+                if showsFacingPages {
+                    LazyVStack(spacing: PreviewStyle.facingSpreadSpacing) {
+                        ForEach(pageSpreads(for: pages), id: \.firstPageNumber) { spread in
+                            HStack(alignment: .top, spacing: PreviewStyle.facingPageSpacing) {
+                                ForEach(Array(spread.items.enumerated()), id: \.offset) { _, item in
+                                    if let page = item.page, let pageNumber = item.pageNumber {
+                                        pageStack(
+                                            page,
+                                            pageNumber: pageNumber,
+                                            totalPageCount: pages.count
+                                        )
+                                        .id(pageNumber)
+                                    } else {
+                                        blankPageSlot(referencePageNumber: item.referencePageNumber)
+                                    }
+                                }
                             }
-
-                            pageCard(page, pageNumber: index + 1, totalPageCount: pages.count)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                         }
-                        .id(index + 1)
-                        .background(pagePositionReader(pageNumber: index + 1))
                     }
+                    .padding(.vertical)
+                    .padding(.horizontal, PreviewStyle.facingHorizontalPadding)
+                } else {
+                    LazyVStack(spacing: 20) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            pageStack(page, pageNumber: index + 1, totalPageCount: pages.count)
+                                .id(index + 1)
+                        }
+                    }
+                    .padding()
                 }
-                .padding()
             }
             .frame(minWidth: 1, minHeight: 1, alignment: .top)
             .coordinateSpace(name: PreviewStyle.scrollCoordinateSpaceName)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(PreviewStyle.canvasBackground(colorScheme))
         .onAppear {
             restoresScrollPosition = false
         }
         .onChange(of: pages.count) { _, count in
             focusedPage = min(max(focusedPage, 1), max(count, 1))
         }
-        .onPreferenceChange(PreviewPagePositionPreferenceKey.self) { positions in
-            guard !restoresScrollPosition,
-                  let focusedPosition = positions.min(by: { abs($0.value.frame.minY) < abs($1.value.frame.minY) }) else {
-                return
-            }
-            let focused = focusedPosition.key
-            let frame = focusedPosition.value.frame
-            focusedPage = focused
-            if frame.width > 1 {
-                horizontalAnchor = (-frame.minX / frame.width).clamped(to: 0...1)
-            }
-        }
-    }
-
-    private func pagePositionReader(pageNumber: Int) -> some View {
-        GeometryReader { proxy in
-            Color.clear.preference(
-                key: PreviewPagePositionPreferenceKey.self,
-                value: [
-                    pageNumber: PreviewPagePosition(
-                        frame: proxy.frame(in: .named(PreviewStyle.scrollCoordinateSpaceName))
-                    )
-                ]
-            )
-        }
     }
 
     private var pageBreakLabel: some View {
         Text("ー 改ページ ー")
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(PreviewStyle.pageBreakLabelBackground, in: Capsule())
             .accessibilityLabel("改ページ")
     }
 
+    private func pageStack(_ page: PreviewPage, pageNumber: Int, totalPageCount: Int) -> some View {
+        VStack(spacing: 8) {
+            if page.startsAfterPageBreak, !showsFacingPages {
+                pageBreakLabel
+            }
+
+            pageCard(page, pageNumber: pageNumber, totalPageCount: totalPageCount)
+        }
+    }
+
+    private func pageSpreads(for pages: [PreviewPage]) -> [PreviewSpread] {
+        guard !pages.isEmpty else { return [] }
+
+        var spreads = [
+            PreviewSpread(items: [
+                PreviewSpreadItem(pageNumber: 1, page: pages[0], referencePageNumber: 1),
+                PreviewSpreadItem(pageNumber: nil, page: nil, referencePageNumber: 1)
+            ])
+        ]
+
+        var evenPageNumber = 2
+        while evenPageNumber <= pages.count {
+            let oddPageNumber = evenPageNumber + 1
+            let rightItem = PreviewSpreadItem(
+                pageNumber: evenPageNumber,
+                page: pages[evenPageNumber - 1],
+                referencePageNumber: evenPageNumber
+            )
+            let leftItem: PreviewSpreadItem
+            if oddPageNumber <= pages.count {
+                leftItem = PreviewSpreadItem(
+                    pageNumber: oddPageNumber,
+                    page: pages[oddPageNumber - 1],
+                    referencePageNumber: oddPageNumber
+                )
+            } else {
+                leftItem = PreviewSpreadItem(
+                    pageNumber: nil,
+                    page: nil,
+                    referencePageNumber: evenPageNumber
+                )
+            }
+
+            spreads.append(PreviewSpread(items: [leftItem, rightItem]))
+            evenPageNumber += 2
+        }
+
+        return spreads
+    }
+
+    private func blankPageSlot(referencePageNumber: Int) -> some View {
+        let layout = viewModel.layout(for: referencePageNumber)
+        return Color.clear.frame(
+            width: layout.pageWidth * pagePreviewScale,
+            height: layout.pageHeight * pagePreviewScale
+        )
+    }
+
     private func pageCard(_ page: PreviewPage, pageNumber: Int, totalPageCount: Int) -> some View {
         let layout = viewModel.layout(for: pageNumber)
 
         return ZStack(alignment: .topLeading) {
-            Color(.systemBackground)
+            PreviewStyle.paperBackground(colorScheme)
 
             if page.kind == .body,
                layout.settings.showChapterTitle,
@@ -117,9 +170,7 @@ struct PreviewView: View {
                 colophonContentView(colophon, layout: layout)
             }
 
-            if page.kind == .body {
-                pageNumberView(pageNumber, layout: layout)
-            }
+            pageNumberView(pageNumber, layout: layout)
 
             if shouldShowPoweredByHonkumi(page: page, pageNumber: pageNumber, totalPageCount: totalPageCount) {
                 poweredByHonkumiView(page: page, layout: layout)
@@ -131,9 +182,15 @@ struct PreviewView: View {
             alignment: .topLeading
         )
         .overlay(alignment: .topLeading) {
-            marginGuide(layout)
+            if showsGuides {
+                layoutGuide(layout, pageNumber: pageNumber)
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: PreviewStyle.pageCornerRadius)
+                .stroke(PreviewStyle.paperBorderColor(colorScheme), lineWidth: PreviewStyle.paperBorderWidth)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: PreviewStyle.pageCornerRadius))
         .shadow(
             color: PreviewStyle.pageShadowColor,
             radius: PreviewStyle.pageShadowRadius,
@@ -176,7 +233,7 @@ struct PreviewView: View {
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 10 * pagePreviewScale) {
                         Text(entry.label)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary)
                             .frame(width: labelWidth, alignment: .leading)
                         Text(entry.value)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -324,7 +381,7 @@ struct PreviewView: View {
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8 * pagePreviewScale) {
             Text(entry.label)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                 .frame(width: metrics.labelWidth, alignment: .leading)
             Text(entry.value)
                 .frame(width: metrics.valueWidth, alignment: .leading)
@@ -369,7 +426,7 @@ struct PreviewView: View {
 
             HStack(alignment: .top, spacing: 10 * pagePreviewScale) {
                 Text(entry.label)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .frame(width: labelWidth, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 6 * pagePreviewScale) {
@@ -387,7 +444,7 @@ struct PreviewView: View {
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 10 * pagePreviewScale) {
                 Text(entry.label)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .frame(width: labelWidth, alignment: .leading)
                 Text(entry.value)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -409,8 +466,8 @@ struct PreviewView: View {
         )
 
         return Text("Powered by Honkumi")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .font(.system(size: max(5, layout.fontSize * 0.48 * pagePreviewScale)))
+            .foregroundStyle(.primary)
             .lineLimit(1)
             .frame(
                 width: layout.pageWidth * pagePreviewScale,
@@ -458,7 +515,7 @@ struct PreviewView: View {
 
         return Text(title)
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
             .lineLimit(1)
             .frame(width: layout.bodyFrame.width * pagePreviewScale, alignment: alignment)
             .offset(
@@ -469,62 +526,45 @@ struct PreviewView: View {
 
     @ViewBuilder
     private func pageNumberView(_ pageNumber: Int, layout: PageLayout) -> some View {
-        let position = pageNumberPosition(layout: layout)
-        if position != .hidden {
-            let x = pageNumberXOffset(layout: layout, position: position)
+        let position = layout.effectivePageNumberPosition(isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked)
+        if layout.settings.isPageNumberEnabled, position != .hidden {
+            let fontSize = pageNumberFontSize(layout: layout)
+            let textSize = CGSize(
+                width: PreviewStyle.pageNumberWidth / pagePreviewScale,
+                height: max(PreviewStyle.pageNumberTextHeight / pagePreviewScale, fontSize * 1.4 / pagePreviewScale)
+            )
+            let origin = layout.pageNumberOrigin(
+                textSize: textSize,
+                isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked
+            )
             Text("\(pageNumber)")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .font(AppFontCatalog.pageNumberSwiftUIFont(
+                    pageNumberFontId: layout.settings.pageNumberFontId,
+                    bodyFontId: layout.settings.selectedFontId,
+                    size: fontSize,
+                    isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked
+                ))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .frame(
                     width: PreviewStyle.pageNumberWidth * pagePreviewScale,
-                    height: PreviewStyle.pageNumberTextHeight,
+                    height: max(PreviewStyle.pageNumberTextHeight, fontSize * 1.4),
                     alignment: .top
                 )
                 .offset(
-                    x: x,
-                    y: pageNumberYOffset(layout: layout)
+                    x: origin.x * pagePreviewScale,
+                    y: origin.y * pagePreviewScale
                 )
         }
     }
 
-    private func pageNumberYOffset(layout: PageLayout) -> CGFloat {
-        let rawY = (layout.pageHeight - layout.marginBottom * PreviewStyle.pageNumberBottomMultiplier) * pagePreviewScale
-        return clampedFooterYOffset(
-            rawY,
-            pageHeight: layout.pageHeight * pagePreviewScale,
-            textHeight: PreviewStyle.pageNumberTextHeight
-        )
+    private func pageNumberFontSize(layout: PageLayout) -> CGFloat {
+        layout.effectivePageNumberFontSize(isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked) * pagePreviewScale
     }
 
     private func clampedFooterYOffset(_ y: CGFloat, pageHeight: CGFloat, textHeight: CGFloat) -> CGFloat {
         let maxY = pageHeight - textHeight - PreviewStyle.footerBottomInset
         return min(y, max(PreviewStyle.footerBottomInset, maxY))
-    }
-
-    private func pageNumberPosition(layout: PageLayout) -> PageNumberPosition {
-        if viewModel.subscriptionStatus == .free {
-            return layout.settings.pageNumberPosition == .hidden ? .hidden : .outside
-        }
-
-        return layout.settings.pageNumberPosition
-    }
-
-    private func pageNumberXOffset(layout: PageLayout, position: PageNumberPosition) -> CGFloat {
-        let numberWidth = PreviewStyle.pageNumberWidth * pagePreviewScale
-
-        switch position {
-        case .hidden:
-            return 0
-        case .center:
-            return layout.bodyFrame.midX * pagePreviewScale - numberWidth / 2
-        case .outside:
-            if layout.isOddPage {
-                return layout.bodyFrame.minX * pagePreviewScale
-            } else {
-                return layout.bodyFrame.maxX * pagePreviewScale - numberWidth
-            }
-        }
     }
 
     private func verticalText(_ columns: [String], layout: PageLayout) -> some View {
@@ -547,14 +587,6 @@ struct PreviewView: View {
                 )
 
                 ZStack(alignment: .topLeading) {
-                    VStack(spacing: 0) {
-                        ForEach(0..<characterCount, id: \.self) { _ in
-                            Color.clear
-                                .frame(width: columnWidth, height: rowHeight)
-                                .border(PreviewStyle.gridLineColor, width: PreviewStyle.gridLineWidth)
-                        }
-                    }
-
                     ForEach(Array(cells.enumerated()), id: \.offset) { rowIndex, characters in
                         verticalCell(
                             characters: characters,
@@ -649,13 +681,7 @@ struct PreviewView: View {
 
         while index < characters.count {
             let character = characters[index]
-            if isEllipsis(character) {
-                cells.append([character])
-                index += 1
-                while characters.indices.contains(index), isEllipsis(characters[index]) {
-                    index += 1
-                }
-            } else if isPunctuation(character),
+            if isPunctuation(character),
                characters.indices.contains(index + 1),
                isClosingQuote(characters[index + 1]) {
                 cells.append([character, characters[index + 1]])
@@ -713,12 +739,14 @@ struct PreviewView: View {
         case "》":
             VerticalGlyph("︾", fontScale: 0.82)
         case "…", "‥":
-            VerticalGlyph("⋯", rotationDegrees: 90)
+            VerticalGlyph("︙", fontScale: 0.86)
+        case "〜", "～":
+            VerticalGlyph("︴", fontScale: 0.9)
         case "、", "。", "､", "｡", "，", "．":
             VerticalGlyph(character, fontScale: 0.66, xOffset: 0.38, yOffset: -0.40, isPunctuation: true)
         case "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ",
              "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ":
-            VerticalGlyph(character, fontScale: 0.74, xOffset: 0.30, yOffset: -0.32)
+            VerticalGlyph(character, fontScale: 0.74, xOffset: 0.16, yOffset: -0.10)
         case "―", "─", "—", "ｰ", "ー":
             VerticalGlyph("｜", fontScale: 0.78)
         default:
@@ -745,41 +773,94 @@ struct PreviewView: View {
         ].contains(character)
     }
 
+    private func layoutGuide(_ layout: PageLayout, pageNumber: Int) -> some View {
+        ZStack(alignment: .topLeading) {
+            bodyAreaFill(layout)
+            marginGuide(layout)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func bodyAreaFill(_ layout: PageLayout) -> some View {
+        Rectangle()
+            .fill(PreviewStyle.bodyAreaFillColor)
+            .frame(
+                width: layout.bodyFrame.width * pagePreviewScale,
+                height: layout.bodyFrame.height * pagePreviewScale
+            )
+            .offset(
+                x: layout.bodyFrame.minX * pagePreviewScale,
+                y: layout.bodyFrame.minY * pagePreviewScale
+            )
+    }
+
     private func marginGuide(_ layout: PageLayout) -> some View {
         Path { path in
-            path.addRect(CGRect(
+            let pageRect = CGRect(
+                x: 0,
+                y: 0,
+                width: layout.pageWidth * pagePreviewScale,
+                height: layout.pageHeight * pagePreviewScale
+            )
+            let bodyRect = CGRect(
                 x: layout.bodyFrame.minX * pagePreviewScale,
                 y: layout.bodyFrame.minY * pagePreviewScale,
                 width: layout.bodyFrame.width * pagePreviewScale,
                 height: layout.bodyFrame.height * pagePreviewScale
-            ))
+            )
+
+            path.addRect(pageRect)
+            path.addRect(bodyRect)
+            path.move(to: CGPoint(x: bodyRect.minX, y: pageRect.minY))
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: pageRect.maxY))
+            path.move(to: CGPoint(x: bodyRect.maxX, y: pageRect.minY))
+            path.addLine(to: CGPoint(x: bodyRect.maxX, y: pageRect.maxY))
+            path.move(to: CGPoint(x: pageRect.minX, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: pageRect.maxX, y: bodyRect.minY))
+            path.move(to: CGPoint(x: pageRect.minX, y: bodyRect.maxY))
+            path.addLine(to: CGPoint(x: pageRect.maxX, y: bodyRect.maxY))
         }
         .stroke(
             PreviewStyle.marginGuideColor,
-            style: StrokeStyle(lineWidth: PreviewStyle.marginGuideWidth, dash: PreviewStyle.marginGuideDash)
+            style: StrokeStyle(lineWidth: PreviewStyle.marginGuideWidth)
         )
     }
+
 }
 
 private enum PreviewStyle {
-    static let basePageScale: CGFloat = 0.7
+    static let basePageScale: CGFloat = 0.6
     static let scrollCoordinateSpaceName = "previewScroll"
     static let pageScaleRange: ClosedRange<CGFloat> = 1...3.2
-    static let gridLineColor = Color(hex: 0xEAEAEA).opacity(0.28)
-    static let gridLineWidth: CGFloat = 0.5
-    static let marginGuideColor = Color(hex: 0xD9D9D9).opacity(0.75)
-    static let marginGuideActiveColor = Color.accentColor.opacity(0.35)
-    static let marginGuideWidth: CGFloat = 1
-    static let marginGuideDash: [CGFloat] = [4, 3]
-    static let pageShadowColor = Color.black.opacity(0.06)
+    static func canvasBackground(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(hex: 0x07090D) : Color(hex: 0x111111)
+    }
+
+    static func paperBackground(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(hex: 0x252B34) : Color(hex: 0xF7F5EF)
+    }
+
+    static func paperBorderColor(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(hex: 0x5E6A7A) : Color(hex: 0xC7C1B5)
+    }
+
+    static let paperBorderWidth: CGFloat = 0.7
+    static let pageCornerRadius: CGFloat = 4
+    static let facingPageSpacing: CGFloat = 3
+    static let facingSpreadSpacing: CGFloat = 14
+    static let facingHorizontalPadding: CGFloat = 20
+    static let bodyAreaFillColor = Color(hex: 0x2F80ED).opacity(0.045)
+    static let marginGuideColor = Color(hex: 0x2F80ED).opacity(0.72)
+    static let marginGuideWidth: CGFloat = 0.75
+    static let pageShadowColor = Color.black.opacity(0.28)
     static let pageShadowRadius: CGFloat = 4
     static let pageShadowYOffset: CGFloat = 2
     static let pageNumberWidth: CGFloat = 18
     static let pageNumberTextHeight: CGFloat = 16
     static let poweredByTextHeight: CGFloat = 16
     static let pageNumberBottomMultiplier: CGFloat = 0.82
-    static let poweredByBodyBottomMultiplier: CGFloat = 0.48
-    static let poweredByColophonBottomMultiplier: CGFloat = 0.72
+    static let poweredByBodyBottomMultiplier: CGFloat = 0.82
+    static let poweredByColophonBottomMultiplier: CGFloat = 0.82
     static let footerBottomInset: CGFloat = 2
     static let pageBreakLabelBackground = Color(hex: 0xEAEAEA).opacity(0.45)
 }
@@ -810,7 +891,7 @@ private struct ZoomablePreviewScrollView<Content: View>: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = UIScrollView()
-        scrollView.backgroundColor = .systemGroupedBackground
+        scrollView.backgroundColor = .clear
         scrollView.delegate = context.coordinator
         scrollView.minimumZoomScale = minimumZoomScale
         scrollView.maximumZoomScale = maximumZoomScale
@@ -839,7 +920,12 @@ private struct ZoomablePreviewScrollView<Content: View>: UIViewRepresentable {
 
     func updateUIView(_ scrollView: UIScrollView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.hostingController.rootView = AnyView(content())
+        if context.coordinator.isUserInteracting(with: scrollView) {
+            context.coordinator.needsRootViewRefresh = true
+        } else {
+            context.coordinator.hostingController.rootView = AnyView(content())
+            context.coordinator.needsRootViewRefresh = false
+        }
         scrollView.minimumZoomScale = minimumZoomScale
         scrollView.maximumZoomScale = maximumZoomScale
 
@@ -850,18 +936,35 @@ private struct ZoomablePreviewScrollView<Content: View>: UIViewRepresentable {
             scrollView.setZoomScale(clampedZoomScale, animated: false)
         }
 
-        guard !context.coordinator.didRestoreInitialOffset else { return }
-        context.coordinator.didRestoreInitialOffset = true
+        guard !context.coordinator.isUserInteracting(with: scrollView) else { return }
+
         DispatchQueue.main.async {
+            guard !context.coordinator.isUserInteracting(with: scrollView) else { return }
+
             let maxOffset = CGPoint(
                 x: max(scrollView.contentSize.width - scrollView.bounds.width, 0),
                 y: max(scrollView.contentSize.height - scrollView.bounds.height, 0)
             )
-            let restoredOffset = CGPoint(
-                x: contentOffset.x.clamped(to: 0...maxOffset.x),
-                y: contentOffset.y.clamped(to: 0...maxOffset.y)
-            )
-            scrollView.setContentOffset(restoredOffset, animated: false)
+            let targetOffset = context.coordinator.didRestoreInitialOffset
+                ? CGPoint(
+                    x: scrollView.contentOffset.x.clamped(to: 0...maxOffset.x),
+                    y: scrollView.contentOffset.y.clamped(to: 0...maxOffset.y)
+                )
+                : CGPoint(
+                    x: contentOffset.x.clamped(to: 0...maxOffset.x),
+                    y: contentOffset.y.clamped(to: 0...maxOffset.y)
+                )
+            context.coordinator.didRestoreInitialOffset = true
+
+            if abs(scrollView.contentOffset.x - targetOffset.x) > 0.5
+                || abs(scrollView.contentOffset.y - targetOffset.y) > 0.5 {
+                scrollView.setContentOffset(targetOffset, animated: false)
+            }
+
+            if abs(contentOffset.x - targetOffset.x) > 0.5
+                || abs(contentOffset.y - targetOffset.y) > 0.5 {
+                self.contentOffset = targetOffset
+            }
         }
     }
 
@@ -869,6 +972,7 @@ private struct ZoomablePreviewScrollView<Content: View>: UIViewRepresentable {
         var parent: ZoomablePreviewScrollView
         let hostingController: UIHostingController<AnyView>
         var didRestoreInitialOffset = false
+        var needsRootViewRefresh = false
 
         init(parent: ZoomablePreviewScrollView) {
             self.parent = parent
@@ -896,16 +1000,32 @@ private struct ZoomablePreviewScrollView<Content: View>: UIViewRepresentable {
 
         func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
             updateBindings(from: scrollView)
+            refreshRootViewIfNeeded()
         }
 
         func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
             if !decelerate {
                 updateBindings(from: scrollView)
+                refreshRootViewIfNeeded()
             }
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
             updateBindings(from: scrollView)
+            refreshRootViewIfNeeded()
+        }
+
+        func isUserInteracting(with scrollView: UIScrollView) -> Bool {
+            scrollView.isTracking
+                || scrollView.isDragging
+                || scrollView.isDecelerating
+                || scrollView.isZooming
+        }
+
+        private func refreshRootViewIfNeeded() {
+            guard needsRootViewRefresh else { return }
+            hostingController.rootView = AnyView(parent.content())
+            needsRootViewRefresh = false
         }
 
         private func updateBindings(from scrollView: UIScrollView) {
@@ -948,6 +1068,20 @@ private struct VerticalGlyph: Equatable {
         self.yOffset = yOffset
         self.isPunctuation = isPunctuation
     }
+}
+
+private struct PreviewSpread {
+    let items: [PreviewSpreadItem]
+
+    var firstPageNumber: Int {
+        items.compactMap(\.pageNumber).first ?? 0
+    }
+}
+
+private struct PreviewSpreadItem {
+    let pageNumber: Int?
+    let page: PreviewPage?
+    let referencePageNumber: Int
 }
 
 private struct PreviewPagePosition: Equatable {

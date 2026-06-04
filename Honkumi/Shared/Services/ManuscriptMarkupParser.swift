@@ -1,6 +1,6 @@
 import Foundation
 
-enum ManuscriptMarkupParser {
+nonisolated enum ManuscriptMarkupParser {
     static let pageBreakTag = "[[PAGE_BREAK]]"
     static let tableOfContentsTag = "[[toc]]"
     static let colophonTag = "[[colophon]]"
@@ -198,11 +198,11 @@ enum ManuscriptMarkupParser {
     }
 }
 
-struct ParsedManuscript: Equatable {
+nonisolated struct ParsedManuscript: Equatable {
     let segments: [ParsedManuscriptSegment]
 }
 
-struct ParsedManuscriptSegment: Equatable {
+nonisolated struct ParsedManuscriptSegment: Equatable {
     let text: String
     let chapterTitle: String?
     let startsChapter: Bool

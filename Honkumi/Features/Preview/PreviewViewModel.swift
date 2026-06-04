@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-struct PreviewPage: Identifiable, Equatable {
+nonisolated struct PreviewPage: Identifiable, Equatable {
     let id = UUID()
     let kind: PreviewPageKind
     let columns: [String]
@@ -24,12 +24,12 @@ struct PreviewPage: Identifiable, Equatable {
     }
 }
 
-enum PreviewPageKind: Equatable {
+nonisolated enum PreviewPageKind: Equatable {
     case body
     case colophon(ColophonSettings)
 }
 
-struct ColophonEntry: Identifiable, Equatable {
+nonisolated struct ColophonEntry: Identifiable, Equatable {
     let id: String
     let label: String
     let value: String
@@ -54,13 +54,13 @@ struct ColophonEntry: Identifiable, Equatable {
     }
 }
 
-struct VerticalHorizontalColophonEntry: Identifiable, Equatable {
+nonisolated struct VerticalHorizontalColophonEntry: Identifiable, Equatable {
     let id: String
     let entry: ColophonEntry
     let columnIndex: Int
 }
 
-enum ManuscriptPaginator {
+nonisolated enum ManuscriptPaginator {
     private static let maxTableOfContentsPasses = 6
 
     static func pages(for document: ManuscriptDocument) -> [PreviewPage] {
@@ -153,7 +153,11 @@ enum ManuscriptPaginator {
         var currentChapterStarts: [String] = []
 
         func appendCurrentPage() {
-            guard !currentLines.isEmpty || pages.isEmpty else { return }
+            guard !currentLines.isEmpty || pages.isEmpty else {
+                currentStartsAfterPageBreak = false
+                currentChapterStarts = []
+                return
+            }
             pages.append(PreviewPage(
                 columns: currentLines.isEmpty ? [""] : currentLines,
                 startsAfterPageBreak: currentStartsAfterPageBreak,
@@ -167,13 +171,11 @@ enum ManuscriptPaginator {
 
         for (segmentIndex, segment) in segments.enumerated() {
             if segment.isColophonPlaceholder {
-                if !currentLines.isEmpty {
-                    appendCurrentPage()
-                }
+                appendCurrentPage()
                 if let colophonPage = colophonPage(settings: settings, workTitle: workTitle) {
                     pages.append(colophonPage)
                 }
-                currentStartsAfterPageBreak = true
+                currentStartsAfterPageBreak = false
                 continue
             }
 
@@ -509,13 +511,7 @@ enum ManuscriptPaginator {
         var index = 0
 
         while index < characters.count {
-            if isEllipsis(characters[index]) {
-                count += 1
-                index += 1
-                while characters.indices.contains(index), isEllipsis(characters[index]) {
-                    index += 1
-                }
-            } else if isPunctuation(characters[index]),
+            if isPunctuation(characters[index]),
                characters.indices.contains(index + 1),
                isClosingQuote(characters[index + 1]) {
                 count += 1
@@ -603,7 +599,7 @@ enum ManuscriptPaginator {
         "」", "』", "）", "】", "》", "〉", "］", "｝",
         "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ",
         "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ",
-        "ー", "々", "ゝ", "ゞ"
+        "ー", "─", "々", "ゝ", "ゞ"
     ]
 
     private static let lineEndProhibitedCharacters: Set<String> = [
@@ -611,11 +607,11 @@ enum ManuscriptPaginator {
     ]
 
     private static let nonBreakingPairs: Set<String> = [
-        "……", "――", "——", "！？", "？！", "!!", "??", "!?", "?!"
+        "……", "──", "――", "——", "！？", "？！", "!!", "??", "!?", "?!"
     ]
 }
 
-struct TableOfContentsEntry: Equatable {
+nonisolated struct TableOfContentsEntry: Equatable {
     let title: String
     let pageNumber: Int
 }
@@ -623,19 +619,30 @@ struct TableOfContentsEntry: Equatable {
 @MainActor
 final class PreviewViewModel: ObservableObject {
     @Published private(set) var document: ManuscriptDocument
+    @Published private(set) var pages: [PreviewPage]
 
     private let documentStore: DocumentStore
+    private var cancellables = Set<AnyCancellable>()
+    private var paginationTask: Task<Void, Never>?
+    private var paginationGeneration = 0
 
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
         self.document = documentStore.document
+        self.pages = [PreviewPage(columns: [""], startsAfterPageBreak: false, chapterTitle: nil)]
+        schedulePagination(for: documentStore.document, debounceMilliseconds: 0)
 
         documentStore.$document
-            .assign(to: &$document)
+            .sink { [weak self] document in
+                guard let self else { return }
+                self.document = document
+                self.schedulePagination(for: document, debounceMilliseconds: 250)
+            }
+            .store(in: &cancellables)
     }
 
-    var pages: [PreviewPage] {
-        ManuscriptPaginator.pages(for: document)
+    deinit {
+        paginationTask?.cancel()
     }
 
     var subscriptionStatus: SubscriptionStatus {
@@ -646,7 +653,39 @@ final class PreviewViewModel: ObservableObject {
         documentStore.isAdditionalFontPackUnlocked
     }
 
+    var isPageNumberFontUnlocked: Bool {
+        documentStore.isPageNumberFontUnlocked
+    }
+
     func layout(for pageNumber: Int) -> PageLayout {
         LayoutCalculator.layout(for: document.settings, pageNumber: pageNumber)
+    }
+
+    private func schedulePagination(for document: ManuscriptDocument, debounceMilliseconds: UInt64) {
+        paginationTask?.cancel()
+        paginationGeneration += 1
+        let generation = paginationGeneration
+        let documentSnapshot = document
+
+        paginationTask = Task.detached(priority: .utility) { [weak self] in
+            if debounceMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(debounceMilliseconds))
+                guard !Task.isCancelled else { return }
+            }
+
+            let pages = ManuscriptPaginator.pages(for: documentSnapshot)
+            guard !Task.isCancelled else { return }
+
+            await self?.applyPagination(
+                pages: pages,
+                generation: generation,
+                documentID: documentSnapshot.id
+            )
+        }
+    }
+
+    private func applyPagination(pages: [PreviewPage], generation: Int, documentID: UUID) {
+        guard paginationGeneration == generation, document.id == documentID else { return }
+        self.pages = pages
     }
 }

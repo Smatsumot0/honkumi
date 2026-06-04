@@ -1,6 +1,6 @@
 import Foundation
 
-struct ManuscriptDocument: Codable, Equatable, Identifiable {
+nonisolated struct ManuscriptDocument: Codable, Equatable, Identifiable {
     var id: UUID
     var categoryId: UUID
     var title: String
@@ -28,7 +28,7 @@ struct ManuscriptDocument: Codable, Equatable, Identifiable {
     }
 }
 
-extension ManuscriptDocument {
+nonisolated extension ManuscriptDocument {
     private enum CodingKeys: String, CodingKey {
         case id
         case categoryId
@@ -53,7 +53,7 @@ extension ManuscriptDocument {
     }
 }
 
-extension ManuscriptDocument {
+nonisolated extension ManuscriptDocument {
     static let sampleBody = """
     [[CHAPTER: 第一章]]
     あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよ

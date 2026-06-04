@@ -10,6 +10,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var selectedRange: NSRange
     @Binding var requestedSelectedRange: NSRange?
+    @Binding var contentOffset: CGPoint
     @Binding var isEditing: Bool
     @Binding var command: ManuscriptTextEditorCommand?
     let selectedFontId: String
@@ -22,7 +23,10 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.font = editorFont()
         textView.adjustsFontForContentSizeCategory = true
-        textView.backgroundColor = .clear
+        textView.backgroundColor = .secondarySystemBackground
+        textView.textColor = .label
+        textView.tintColor = .label
+        textView.keyboardDismissMode = .interactive
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 6, bottom: 8, right: 6)
         return textView
     }
@@ -30,6 +34,17 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     func updateUIView(_ textView: UITextView, context: Context) {
         context.coordinator.parent = self
         textView.font = editorFont()
+        textView.backgroundColor = .secondarySystemBackground
+        textView.textColor = .label
+        textView.tintColor = .label
+
+        if !context.coordinator.didRestoreInitialOffset {
+            context.coordinator.didRestoreInitialOffset = true
+            DispatchQueue.main.async {
+                guard !context.coordinator.isUserScrolling(in: textView) else { return }
+                textView.setContentOffset(contentOffset, animated: false)
+            }
+        }
 
         if let command {
             context.coordinator.perform(command, in: textView)
@@ -39,15 +54,18 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         }
 
         if let requestedSelectedRange {
+            let preservedOffset = textView.contentOffset
             if textView.text != text {
                 textView.text = text
             }
 
             let safeRange = clampedRange(requestedSelectedRange, in: textView.text)
             context.coordinator.applySelection(safeRange, to: textView)
+            textView.setContentOffset(preservedOffset, animated: false)
             DispatchQueue.main.async {
                 self.selectedRange = safeRange
                 self.requestedSelectedRange = nil
+                self.contentOffset = preservedOffset
             }
             return
         }
@@ -57,7 +75,9 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         }
 
         if !textView.isFirstResponder, textView.text != text {
+            let preservedOffset = textView.contentOffset
             textView.text = text
+            textView.setContentOffset(preservedOffset, animated: false)
         }
     }
 
@@ -86,6 +106,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         var parent: ManuscriptTextEditor
         private var isApplyingSelection = false
         private var isApplyingTextChange = false
+        var didRestoreInitialOffset = false
 
         init(_ parent: ManuscriptTextEditor) {
             self.parent = parent
@@ -99,6 +120,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         }
 
         func perform(_ command: ManuscriptTextEditorCommand, in textView: UITextView) {
+            let preservedOffset = textView.contentOffset
             switch command {
             case .undo:
                 textView.undoManager?.undo()
@@ -106,8 +128,10 @@ struct ManuscriptTextEditor: UIViewRepresentable {
                 textView.undoManager?.redo()
             }
 
+            textView.setContentOffset(preservedOffset, animated: false)
             parent.text = textView.text
             parent.selectedRange = textView.selectedRange
+            parent.contentOffset = preservedOffset
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -128,13 +152,45 @@ struct ManuscriptTextEditor: UIViewRepresentable {
 
         func textViewDidEndEditing(_ textView: UITextView) {
             parent.isEditing = false
+            saveContentOffset(from: textView)
             guard textView.markedTextRange == nil else { return }
             applyFormatIfNeeded(to: textView)
+        }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            saveContentOffset(from: scrollView)
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate {
+                saveContentOffset(from: scrollView)
+            }
+        }
+
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            saveContentOffset(from: scrollView)
+        }
+
+        func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+            saveContentOffset(from: scrollView)
+        }
+
+        func isUserScrolling(in scrollView: UIScrollView) -> Bool {
+            scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating
+        }
+
+        private func saveContentOffset(from scrollView: UIScrollView) {
+            let offset = scrollView.contentOffset
+            if abs(parent.contentOffset.x - offset.x) > 0.5
+                || abs(parent.contentOffset.y - offset.y) > 0.5 {
+                parent.contentOffset = offset
+            }
         }
 
         private func applyFormatIfNeeded(to textView: UITextView) {
             let originalText = textView.text ?? ""
             let originalSelection = textView.selectedRange
+            let originalOffset = textView.contentOffset
             let formattedText = ManuscriptFormatter.formatManuscriptText(
                 originalText,
                 settings: parent.formatSettings,
@@ -150,12 +206,15 @@ struct ManuscriptTextEditor: UIViewRepresentable {
                 isApplyingTextChange = true
                 textView.text = formattedText
                 textView.selectedRange = adjustedSelection
+                textView.setContentOffset(originalOffset, animated: false)
                 isApplyingTextChange = false
                 parent.text = formattedText
                 parent.selectedRange = adjustedSelection
+                parent.contentOffset = originalOffset
             } else {
                 parent.text = originalText
                 parent.selectedRange = originalSelection
+                parent.contentOffset = originalOffset
             }
         }
 

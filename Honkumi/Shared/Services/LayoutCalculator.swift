@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-enum LayoutCalculator {
+nonisolated enum LayoutCalculator {
     static let millimetersPerInch: CGFloat = 25.4
     static let pointsPerInch: CGFloat = 72
 

@@ -2,22 +2,24 @@ import CoreImage.CIFilterBuiltins
 import Foundation
 import UIKit
 
-struct PDFExportService {
+nonisolated struct PDFExportService {
     private let bodyExporter = BodyPDFExportService()
 
     func export(document: ManuscriptDocument, subscriptionStatus: SubscriptionStatus = .free) async throws -> URL {
-        try await bodyExporter.export(document: document, subscriptionStatus: subscriptionStatus)
+        let exporter = bodyExporter
+        return try await Task.detached(priority: .userInitiated) {
+            try exporter.export(document: document, subscriptionStatus: subscriptionStatus)
+        }.value
     }
 }
 
-private enum FooterPlacement {
-    static let pageNumberBottomMultiplier: CGFloat = 0.82
-    static let poweredByBodyBottomMultiplier: CGFloat = 0.48
-    static let poweredByColophonBottomMultiplier: CGFloat = 0.72
+nonisolated private enum FooterPlacement {
+    static let poweredByBodyBottomMultiplier: CGFloat = 0.82
+    static let poweredByColophonBottomMultiplier: CGFloat = 0.82
     static let bottomInset: CGFloat = 2
 }
 
-private struct VerticalHorizontalColophonMetrics {
+nonisolated private struct VerticalHorizontalColophonMetrics {
     let blockX: CGFloat
     let blockY: CGFloat
     let blockWidth: CGFloat
@@ -28,8 +30,8 @@ private struct VerticalHorizontalColophonMetrics {
     let lineHeight: CGFloat
 }
 
-struct BodyPDFExportService {
-    func export(document: ManuscriptDocument, subscriptionStatus: SubscriptionStatus = .free) async throws -> URL {
+nonisolated struct BodyPDFExportService {
+    func export(document: ManuscriptDocument, subscriptionStatus: SubscriptionStatus = .free) throws -> URL {
         let settings = document.settings.validated
         let exportDocument = formattedExportDocument(
             from: document,
@@ -110,9 +112,7 @@ struct BodyPDFExportService {
             )
         }
 
-        if page.kind == .body {
-            drawPageNumber(pageNumber, subscriptionStatus: subscriptionStatus, in: layout)
-        }
+        drawPageNumber(pageNumber, subscriptionStatus: subscriptionStatus, in: layout)
 
         if shouldShowPoweredByHonkumi(
             page: page,
@@ -149,6 +149,7 @@ struct BodyPDFExportService {
                 in: layout,
                 isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
             ),
+            .foregroundColor: UIColor.black,
             .kern: layout.settings.characterSpacing
         ]
         let lineCount = layout.settings.linesPerPage
@@ -182,14 +183,16 @@ struct BodyPDFExportService {
                         in: layout,
                         isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
                     )
-                    let rect = CGRect(
-                        x: x + offset.x,
-                        y: layout.bodyFrame.minY + CGFloat(rowIndex) * rowAdvance + offset.y,
-                        width: layout.lineAdvance,
-                        height: rowAdvance
-                    )
                     let attributedText = NSAttributedString(string: glyph, attributes: glyphAttributes)
-                    attributedText.draw(in: rect)
+                    let glyphSize = (glyph as NSString).size(withAttributes: glyphAttributes)
+                    let cellOrigin = CGPoint(
+                        x: x,
+                        y: layout.bodyFrame.minY + CGFloat(rowIndex) * rowAdvance
+                    )
+                    attributedText.draw(at: CGPoint(
+                        x: cellOrigin.x + (layout.lineAdvance - glyphSize.width) / 2 + offset.x,
+                        y: cellOrigin.y + (rowAdvance - glyphSize.height) / 2 + offset.y
+                    ))
                 }
             }
         }
@@ -221,7 +224,7 @@ struct BodyPDFExportService {
         )
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: UIColor.secondaryLabel
+            .foregroundColor: UIColor.black
         ]
         let size = (title as NSString).size(withAttributes: attributes)
         let x = layout.isOddPage ? layout.bodyFrame.minX : layout.bodyFrame.maxX - size.width
@@ -230,42 +233,23 @@ struct BodyPDFExportService {
     }
 
     private func drawPageNumber(_ pageNumber: Int, subscriptionStatus: SubscriptionStatus, in layout: PageLayout) {
-        let position = pageNumberPosition(in: layout, subscriptionStatus: subscriptionStatus)
-        guard position != .hidden else { return }
+        let position = layout.effectivePageNumberPosition(isPageNumberFontUnlocked: subscriptionStatus == .paid)
+        guard layout.settings.isPageNumberEnabled, position != .hidden else { return }
 
         let text = "\(pageNumber)" as NSString
-        let font = UIFont.monospacedDigitSystemFont(ofSize: max(layout.fontSize * 0.8, 6), weight: .regular)
+        let font = AppFontCatalog.pageNumberUIFont(
+            pageNumberFontId: layout.settings.pageNumberFontId,
+            bodyFontId: layout.settings.selectedFontId,
+            size: layout.effectivePageNumberFontSize(isPageNumberFontUnlocked: subscriptionStatus == .paid),
+            isPageNumberFontUnlocked: subscriptionStatus == .paid
+        )
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: UIColor.secondaryLabel
+            .foregroundColor: UIColor.black
         ]
         let size = text.size(withAttributes: attributes)
-        let x: CGFloat
-
-        switch position {
-        case .hidden:
-            return
-        case .center:
-            x = layout.bodyFrame.midX - size.width / 2
-        case .outside:
-            x = layout.isOddPage ? layout.bodyFrame.minX : layout.bodyFrame.maxX - size.width
-        }
-
-        let y = footerY(
-            pageHeight: layout.pageHeight,
-            marginBottom: layout.marginBottom,
-            multiplier: FooterPlacement.pageNumberBottomMultiplier,
-            textHeight: size.height
-        )
-        text.draw(at: CGPoint(x: x, y: y), withAttributes: attributes)
-    }
-
-    private func pageNumberPosition(in layout: PageLayout, subscriptionStatus: SubscriptionStatus) -> PageNumberPosition {
-        if subscriptionStatus == .free {
-            return layout.settings.pageNumberPosition == .hidden ? .hidden : .outside
-        }
-
-        return layout.settings.pageNumberPosition
+        let origin = layout.pageNumberOrigin(textSize: size, isPageNumberFontUnlocked: subscriptionStatus == .paid)
+        text.draw(at: origin, withAttributes: attributes)
     }
 
     private func drawHorizontalColophon(
@@ -282,11 +266,11 @@ struct BodyPDFExportService {
         )
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: UIColor.secondaryLabel
+            .foregroundColor: UIColor.black
         ]
         let valueAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: UIColor.label
+            .foregroundColor: UIColor.black
         ]
         let labelWidth = min(layout.bodyFrame.width * 0.28, 72)
         let valueX = layout.bodyFrame.minX + labelWidth + 10
@@ -524,11 +508,11 @@ struct BodyPDFExportService {
         )
         let labelAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: UIColor.secondaryLabel
+            .foregroundColor: UIColor.black
         ]
         let valueAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: UIColor.label
+            .foregroundColor: UIColor.black
         ]
         let metrics = verticalHorizontalColophonMetrics(in: layout)
 
@@ -604,10 +588,10 @@ struct BodyPDFExportService {
 
     private func drawPoweredByHonkumi(on page: PreviewPage, in layout: PageLayout) {
         let text = "Powered by Honkumi" as NSString
-        let font = UIFont.systemFont(ofSize: max(layout.fontSize * 0.68, 5), weight: .regular)
+        let font = UIFont.systemFont(ofSize: max(layout.fontSize * 0.48, 4.5), weight: .regular)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: UIColor.tertiaryLabel
+            .foregroundColor: UIColor.black
         ]
         let size = text.size(withAttributes: attributes)
         let rawY: CGFloat = switch page.kind {
@@ -677,13 +661,7 @@ struct BodyPDFExportService {
 
         while index < characters.count {
             let character = characters[index]
-            if isEllipsis(character) {
-                cells.append([character])
-                index += 1
-                while characters.indices.contains(index), isEllipsis(characters[index]) {
-                    index += 1
-                }
-            } else if isPunctuation(character),
+            if isPunctuation(character),
                characters.indices.contains(index + 1),
                isClosingQuote(characters[index + 1]) {
                 cells.append([character, characters[index + 1]])
@@ -708,7 +686,7 @@ struct BodyPDFExportService {
         if isPunctuation(character) {
             punctuationOffset = CGPoint(x: layout.lineAdvance * 0.38, y: -rowAdvance * 0.40)
         } else if isSmallKana(character) {
-            punctuationOffset = CGPoint(x: layout.lineAdvance * 0.30, y: -rowAdvance * 0.32)
+            punctuationOffset = CGPoint(x: layout.lineAdvance * 0.16, y: -rowAdvance * 0.10)
         } else {
             punctuationOffset = .zero
         }
@@ -763,7 +741,7 @@ struct BodyPDFExportService {
     }
 
     private func isDashLike(_ character: String) -> Bool {
-        ["―", "─", "—", "ｰ", "ー"].contains(character)
+        ["―", "─", "—", "ｰ", "ー", "〜", "～"].contains(character)
     }
 
     private func pdfAttributes(
@@ -832,7 +810,9 @@ struct BodyPDFExportService {
         case "》":
             "︾"
         case "…", "‥":
-            "⋯"
+            "︙"
+        case "〜", "～":
+            "︴"
         case "―", "─", "—", "ｰ", "ー":
             "｜"
         default:
@@ -841,20 +821,20 @@ struct BodyPDFExportService {
     }
 }
 
-struct CoverPDFExportService {
+nonisolated struct CoverPDFExportService {
     func exportCover() async throws -> URL {
         throw PDFExportError.notImplemented
     }
 }
 
-struct PDFMergeService {
+nonisolated struct PDFMergeService {
     func merge(_ urls: [URL]) async throws -> URL {
         _ = urls
         throw PDFExportError.notImplemented
     }
 }
 
-enum PDFExportError: LocalizedError {
+nonisolated enum PDFExportError: LocalizedError {
     case notImplemented
 
     var errorDescription: String? {

@@ -1,6 +1,6 @@
 import Foundation
 
-struct AppData: Codable, Equatable {
+nonisolated struct AppData: Codable, Equatable {
     static let currentVersion = 1
 
     var version: Int
@@ -23,7 +23,7 @@ struct AppData: Codable, Equatable {
     }
 }
 
-enum SubscriptionStatus: String, Codable, Equatable {
+nonisolated enum SubscriptionStatus: String, Codable, Equatable {
     case free
     case paid
 
@@ -32,7 +32,7 @@ enum SubscriptionStatus: String, Codable, Equatable {
     }
 }
 
-extension AppData {
+nonisolated extension AppData {
     private enum CodingKeys: String, CodingKey {
         case version
         case categories

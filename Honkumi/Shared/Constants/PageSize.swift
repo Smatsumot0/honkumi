@@ -1,13 +1,13 @@
 import Foundation
 
-enum PageSize: String, CaseIterable, Identifiable, Codable {
+nonisolated enum PageSize: String, CaseIterable, Identifiable, Codable {
     case a6
     case shinsho
     case b6
     case a5
     case b5
 
-    static let selectableCases: [PageSize] = [.a6, .shinsho, .b6, .a5]
+    static let selectableCases: [PageSize] = [.a6, .shinsho, .b6, .a5, .b5]
 
     var id: String { rawValue }
 
@@ -57,7 +57,7 @@ enum PageSize: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-extension PageSize {
+nonisolated extension PageSize {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let value = try container.decode(String.self)

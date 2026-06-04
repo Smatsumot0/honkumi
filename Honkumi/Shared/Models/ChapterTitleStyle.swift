@@ -1,6 +1,6 @@
 import Foundation
 
-enum ChapterTitleStyle: String, Codable, CaseIterable, Identifiable {
+nonisolated enum ChapterTitleStyle: String, Codable, CaseIterable, Identifiable {
     case plain
     case diamond
     case brackets
