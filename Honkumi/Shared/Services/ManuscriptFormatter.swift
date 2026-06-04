@@ -7,7 +7,7 @@ struct FormatRule: Identifiable, Equatable {
     let premium: Bool
 }
 
-enum ManuscriptFormatter {
+nonisolated enum ManuscriptFormatter {
     static let freeRules: [FormatRule] = [
         FormatRule(
             id: \.enableNormalizeBlankLines,
@@ -45,7 +45,7 @@ enum ManuscriptFormatter {
         FormatRule(
             id: \.enableNormalizeDash,
             label: "ダッシュの整形",
-            description: "— や ー の連続を ―― に整えます。",
+            description: "— や ― の連続を ── に整えます。長音符 ー は変更しません。",
             premium: true
         ),
         FormatRule(
@@ -203,7 +203,7 @@ enum ManuscriptFormatter {
 
     private static func normalizeDash(_ text: String) -> String {
         text
-            .replacingOccurrences(of: #"[—ー―]{2,}"#, with: "――", options: .regularExpression)
+            .replacingOccurrences(of: #"[—―─]{2,}"#, with: "──", options: .regularExpression)
     }
 
     private static func normalizeSpaceAfterExclamationQuestion(_ text: String) -> String {

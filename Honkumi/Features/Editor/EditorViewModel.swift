@@ -4,9 +4,13 @@ import Foundation
 @MainActor
 final class EditorViewModel: ObservableObject {
     @Published private(set) var document: ManuscriptDocument
+    @Published private(set) var characterCount = 0
+    @Published private(set) var manuscriptSheetCount = 0
+    @Published private(set) var pageCount = 1
 
     private let documentStore: DocumentStore
     private var cancellables = Set<AnyCancellable>()
+    private var metricsTask: Task<Void, Never>?
     private var undoStack: [String] = []
     private var redoStack: [String] = []
     private var suppressNextDocumentChangeUndo = false
@@ -15,6 +19,7 @@ final class EditorViewModel: ObservableObject {
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
         self.document = documentStore.document
+        scheduleMetricsUpdate(for: documentStore.document, debounceMilliseconds: 0)
 
         documentStore.$document
             .sink { [weak self] document in
@@ -32,8 +37,13 @@ final class EditorViewModel: ObservableObject {
                     }
                 }
                 self.document = document
+                self.scheduleMetricsUpdate(for: document, debounceMilliseconds: 250)
             }
             .store(in: &cancellables)
+    }
+
+    deinit {
+        metricsTask?.cancel()
     }
 
     var body: String {
@@ -44,18 +54,6 @@ final class EditorViewModel: ObservableObject {
     var title: String {
         get { document.title }
         set { documentStore.updateTitle(newValue) }
-    }
-
-    var characterCount: Int {
-        ManuscriptMarkupParser.characterCountBody(from: document.body).count
-    }
-
-    var manuscriptSheetCount: Int {
-        max(Int(ceil(Double(characterCount) / 400.0)), characterCount == 0 ? 0 : 1)
-    }
-
-    var pageCount: Int {
-        ManuscriptPaginator.pages(for: document).count
     }
 
     var formatSettings: FormatSettings {
@@ -207,6 +205,41 @@ final class EditorViewModel: ObservableObject {
         if undoStack.count > historyLimit {
             undoStack.removeFirst(undoStack.count - historyLimit)
         }
+    }
+
+    private func scheduleMetricsUpdate(for document: ManuscriptDocument, debounceMilliseconds: UInt64) {
+        metricsTask?.cancel()
+        let documentSnapshot = document
+        metricsTask = Task.detached(priority: .utility) { [weak self] in
+            if debounceMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(debounceMilliseconds))
+                guard !Task.isCancelled else { return }
+            }
+
+            let characterCount = ManuscriptMarkupParser.characterCountBody(from: documentSnapshot.body).count
+            let pageCount = ManuscriptPaginator.pages(for: documentSnapshot).count
+            let manuscriptSheetCount = max(Int(ceil(Double(characterCount) / 400.0)), characterCount == 0 ? 0 : 1)
+
+            guard !Task.isCancelled else { return }
+            await self?.applyMetrics(
+                characterCount: characterCount,
+                pageCount: pageCount,
+                manuscriptSheetCount: manuscriptSheetCount,
+                documentID: documentSnapshot.id
+            )
+        }
+    }
+
+    private func applyMetrics(
+        characterCount: Int,
+        pageCount: Int,
+        manuscriptSheetCount: Int,
+        documentID: UUID
+    ) {
+        guard document.id == documentID else { return }
+        self.characterCount = characterCount
+        self.pageCount = pageCount
+        self.manuscriptSheetCount = manuscriptSheetCount
     }
 
     private func clampedInsertionRange(_ range: NSRange, in text: String) -> NSRange {
