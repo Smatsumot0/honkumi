@@ -198,6 +198,11 @@ struct WorkListView: View {
                 documentStore.deleteWork(id: work.id)
             }
         }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button("削除", role: .destructive) {
+                documentStore.deleteWork(id: work.id)
+            }
+        }
     }
 
     private func moveDraggedWorks(_ items: [String], to categoryId: UUID) -> Bool {
@@ -228,9 +233,11 @@ private struct WorkRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(work.title)
                     .foregroundStyle(.primary)
-                Text(Self.updatedDateFormatter.string(from: work.updatedAt))
+                Text("作成日 \(Self.dateFormatter.string(from: work.createdAt))　最終更新日 \(Self.dateFormatter.string(from: work.updatedAt))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
             Spacer()
@@ -242,7 +249,7 @@ private struct WorkRow: View {
         }
     }
 
-    private static let updatedDateFormatter: DateFormatter = {
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "ja_JP")
