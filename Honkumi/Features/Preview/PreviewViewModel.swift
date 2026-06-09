@@ -453,6 +453,7 @@ nonisolated enum ManuscriptPaginator {
     ) -> [String] {
         let maxCharacters = max(charactersPerLine, 1)
         var lines: [String] = []
+        var previousLineWasEmpty = false
 
         for rawLine in text.components(separatedBy: .newlines) {
             let line = preparedParagraphLine(
@@ -461,10 +462,14 @@ nonisolated enum ManuscriptPaginator {
                 indentExemptLines: indentExemptLines
             )
             if line.isEmpty {
-                lines.append("")
+                if !previousLineWasEmpty {
+                    lines.append("")
+                }
+                previousLineWasEmpty = true
                 continue
             }
 
+            previousLineWasEmpty = false
             lines.append(contentsOf: wrappedVerticalLines(
                 from: line,
                 maxCharacters: maxCharacters,

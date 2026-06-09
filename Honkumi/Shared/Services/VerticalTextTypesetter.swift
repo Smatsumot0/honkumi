@@ -63,7 +63,7 @@ nonisolated enum VerticalGlyphMetrics {
     static let bracketFontScale: CGFloat = 0.88
     static let narrowSymbolFontScale: CGFloat = 0.86
     static let ellipsisFontScale: CGFloat = 0.86
-    static let sidewaysAlphanumericFontScale: CGFloat = 0.72
+    static let sidewaysAlphanumericFontScale: CGFloat = 1
     static let tateChuYokoFontScale: CGFloat = 0.72
     static let closingBracketAfterBaseOffset = CGPoint(x: -0.03, y: 0.30)
     static let stackedGlyphOverflowYOffset: CGFloat = -0.16
@@ -421,7 +421,7 @@ nonisolated enum VerticalTextTypesetter {
         let widthInEms = text.unicodeScalars.reduce(CGFloat(0)) { partialResult, scalar in
             partialResult + sidewaysScalarWidthInEms(scalar)
         }
-        return max(1, Int(ceil(widthInEms * 0.72 + 0.3)))
+        return max(1, Int(ceil(widthInEms * VerticalGlyphMetrics.sidewaysAlphanumericFontScale + 0.3)))
     }
 
     private static func sidewaysScalarWidthInEms(_ scalar: UnicodeScalar) -> CGFloat {

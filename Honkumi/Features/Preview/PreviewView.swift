@@ -509,6 +509,13 @@ struct PreviewView: View {
             let urlWidth = (entry.value as NSString).size(withAttributes: [
                 .font: UIFont.systemFont(ofSize: fontSize)
             ]).width
+            let valueAreaWidth = max(
+                layout.bodyFrame.width * pagePreviewScale - labelWidth - 10 * pagePreviewScale,
+                1
+            )
+            let blockWidth = max(size, urlWidth)
+            let qrLeading = max((blockWidth - size) / 2, 0)
+            let urlLeading = max((blockWidth - urlWidth) / 2, 0)
 
             HStack(alignment: .top, spacing: 10 * pagePreviewScale) {
                 Text(entry.label)
@@ -521,13 +528,15 @@ struct PreviewView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: size, height: size)
-                        .padding(.leading, max((urlWidth - size) / 2, 0))
+                        .padding(.leading, qrLeading)
                         .accessibilityLabel("HPのQRコード")
                     if colophon.showsWebsiteURL {
                         Text(entry.value)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(width: max(urlWidth, 1), alignment: .leading)
+                            .padding(.leading, urlLeading)
                     }
                 }
+                .frame(width: valueAreaWidth, alignment: .center)
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 10 * pagePreviewScale) {

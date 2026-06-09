@@ -42,6 +42,14 @@ struct VerticalTypesettingRegressionCheck {
             "half-width digits should be sideways even when old settings request tate-chu-yoko"
         )
         expect(
+            VerticalTextTypesetter.glyph(for: "PDF", alphanumericOrientation: .sideways).fontScale == 1,
+            "sideways half-width letters should use the same font size as body text"
+        )
+        expect(
+            VerticalTextTypesetter.cells(from: "PDF", alphanumericOrientation: .sideways).count >= 3,
+            "sideways half-width letters should reserve enough cells at body size"
+        )
+        expect(
             VerticalTextTypesetter.cells(from: "ＡＢＣ１２３", alphanumericOrientation: .sideways).flatMap { $0 } == ["Ａ", "Ｂ", "Ｃ", "１", "２", "３"],
             "full-width alphanumeric characters should remain upright vertical characters"
         )

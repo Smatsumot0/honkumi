@@ -535,14 +535,18 @@ nonisolated struct BodyPDFExportService {
         }
 
         let qrSize = horizontalColophonQRCodeSize(in: layout)
-        let valueWidth = (entry.value as NSString).size(withAttributes: valueAttributes).width
-        let qrX = valueX + max((valueWidth - qrSize) / 2, 0)
+        let urlWidth = (entry.value as NSString).size(withAttributes: valueAttributes).width
+        let availableValueWidth = max(layout.bodyFrame.maxX - valueX, 1)
+        let blockWidth = max(qrSize, urlWidth)
+        let blockX = valueX + max((availableValueWidth - blockWidth) / 2, 0)
+        let qrX = blockX + max((blockWidth - qrSize) / 2, 0)
+        let urlX = blockX + max((blockWidth - urlWidth) / 2, 0)
         image.draw(in: CGRect(x: qrX, y: y, width: qrSize, height: qrSize))
 
         let valueY = y + qrSize + 4
         if colophon.showsWebsiteURL, valueY < layout.bodyFrame.maxY - lineHeight {
             (entry.value as NSString).draw(
-                in: CGRect(x: valueX, y: valueY, width: layout.bodyFrame.maxX - valueX, height: lineHeight),
+                in: CGRect(x: urlX, y: valueY, width: max(urlWidth, 1), height: lineHeight),
                 withAttributes: valueAttributes
             )
         }
