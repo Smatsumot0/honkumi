@@ -330,11 +330,13 @@ nonisolated struct ColophonSettings: Codable, Equatable {
     var isEnabled: Bool
     var writingDirection: ColophonWritingDirection
     var workTitle: String
+    var publisherName: String
     var authorName: String
     var circleName: String
     var authorImageData: Data?
     var circleImageData: Data?
     var usesCircleImageForCreator: Bool
+    var showsPublisherName: Bool
     var showsAuthorName: Bool
     var showsCircleName: Bool
     var showsWebsiteURL: Bool
@@ -353,11 +355,13 @@ nonisolated struct ColophonSettings: Codable, Equatable {
         isEnabled: false,
         writingDirection: .horizontal,
         workTitle: "",
+        publisherName: "",
         authorName: "",
         circleName: "",
         authorImageData: nil,
         circleImageData: nil,
         usesCircleImageForCreator: false,
+        showsPublisherName: true,
         showsAuthorName: true,
         showsCircleName: true,
         showsWebsiteURL: true,
@@ -378,11 +382,13 @@ nonisolated struct ColophonSettings: Codable, Equatable {
             isEnabled: isEnabled,
             writingDirection: .horizontal,
             workTitle: workTitle.trimmedForStorage,
+            publisherName: publisherName.trimmedForStorage,
             authorName: authorName.trimmedForStorage,
             circleName: circleName.trimmedForStorage,
             authorImageData: authorImageData,
             circleImageData: circleImageData,
             usesCircleImageForCreator: usesCircleImageForCreator,
+            showsPublisherName: showsPublisherName,
             showsAuthorName: showsAuthorName,
             showsCircleName: showsCircleName,
             showsWebsiteURL: showsWebsiteURL,
@@ -462,11 +468,13 @@ nonisolated extension ColophonSettings {
         case isEnabled
         case writingDirection
         case workTitle
+        case publisherName
         case authorName
         case circleName
         case authorImageData
         case circleImageData
         case usesCircleImageForCreator
+        case showsPublisherName
         case showsAuthorName
         case showsCircleName
         case showsWebsiteURL
@@ -490,11 +498,13 @@ nonisolated extension ColophonSettings {
             isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled,
             writingDirection: try container.decodeIfPresent(ColophonWritingDirection.self, forKey: .writingDirection) ?? defaults.writingDirection,
             workTitle: try container.decodeIfPresent(String.self, forKey: .workTitle) ?? defaults.workTitle,
+            publisherName: try container.decodeIfPresent(String.self, forKey: .publisherName) ?? defaults.publisherName,
             authorName: try container.decodeIfPresent(String.self, forKey: .authorName) ?? defaults.authorName,
             circleName: try container.decodeIfPresent(String.self, forKey: .circleName) ?? defaults.circleName,
             authorImageData: try container.decodeIfPresent(Data.self, forKey: .authorImageData),
             circleImageData: try container.decodeIfPresent(Data.self, forKey: .circleImageData),
             usesCircleImageForCreator: try container.decodeIfPresent(Bool.self, forKey: .usesCircleImageForCreator) ?? defaults.usesCircleImageForCreator,
+            showsPublisherName: try container.decodeIfPresent(Bool.self, forKey: .showsPublisherName) ?? defaults.showsPublisherName,
             showsAuthorName: try container.decodeIfPresent(Bool.self, forKey: .showsAuthorName) ?? defaults.showsAuthorName,
             showsCircleName: try container.decodeIfPresent(Bool.self, forKey: .showsCircleName) ?? defaults.showsCircleName,
             showsWebsiteURL: try container.decodeIfPresent(Bool.self, forKey: .showsWebsiteURL) ?? defaults.showsWebsiteURL,

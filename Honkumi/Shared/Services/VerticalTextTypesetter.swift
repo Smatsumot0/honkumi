@@ -47,17 +47,17 @@ nonisolated struct VerticalGlyphAdjustment: Equatable {
 
 nonisolated enum VerticalGlyphMetrics {
     static let punctuation = VerticalGlyphAdjustment(
-        fontScale: 0.64,
-        xOffset: 0.10,
-        yOffset: -0.04
+        fontScale: 0.62,
+        xOffset: -0.03,
+        yOffset: 0.16
     )
     static let punctuationAfterBaseYOffset: CGFloat = 0.30
     static let punctuationOverflowYOffset: CGFloat = 0.30
 
     static let smallKana = VerticalGlyphAdjustment(
-        fontScale: 0.74,
-        xOffset: 0.06,
-        yOffset: 0.04
+        fontScale: 0.76,
+        xOffset: -0.04,
+        yOffset: 0.12
     )
 
     static let bracketFontScale: CGFloat = 0.88
@@ -105,13 +105,11 @@ nonisolated enum VerticalTextTypesetter {
             let character = characters[index]
 
             if isEllipsis(character) {
-                var run = character
-                index += 1
-                while index < characters.count, isEllipsis(characters[index]) {
-                    run += characters[index]
-                    index += 1
+                let run = ellipsisRun(in: characters, startingAt: index)
+                for chunk in ellipsisChunks(from: run.text) {
+                    units.append(VerticalTextLayoutUnit(chunk, cellSpan: chunk.count))
                 }
-                units.append(VerticalTextLayoutUnit(run, cellSpan: run.count))
+                index = run.endIndex
             } else if isExclamationQuestion(character),
                       characters.indices.contains(index + 1),
                       isExclamationQuestion(characters[index + 1]) {
@@ -355,6 +353,12 @@ nonisolated enum VerticalTextTypesetter {
               let secondCharacter = second.first.map(String.init) else {
             return false
         }
+        if let first, isEllipsisRun(first), isPunctuation(secondCharacter) {
+            return true
+        }
+        if let first, isExclamationQuestionPair(first), isClosingQuote(secondCharacter) {
+            return true
+        }
         return nonBreakingPairs.contains(firstCharacter + secondCharacter)
     }
 
@@ -395,6 +399,35 @@ nonisolated enum VerticalTextTypesetter {
         }
 
         return (run, max(cursor, index + 1))
+    }
+
+    private static func ellipsisRun(
+        in characters: [String],
+        startingAt index: Int
+    ) -> (text: String, endIndex: Int) {
+        var run = ""
+        var cursor = index
+
+        while cursor < characters.count, isEllipsis(characters[cursor]) {
+            run += characters[cursor]
+            cursor += 1
+        }
+
+        return (run, cursor)
+    }
+
+    private static func ellipsisChunks(from run: String) -> [String] {
+        let characters = run.map(String.init)
+        var chunks: [String] = []
+        var index = 0
+
+        while index < characters.count {
+            let nextIndex = min(index + 2, characters.count)
+            chunks.append(characters[index..<nextIndex].joined())
+            index = nextIndex
+        }
+
+        return chunks
     }
 
     private static func alphanumericCellSpan(

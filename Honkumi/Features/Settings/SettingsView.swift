@@ -160,6 +160,25 @@ struct SettingsView: View {
                 Toggle("奥付を追加", isOn: colophonBinding(\.isEnabled))
 
                 if viewModel.isActiveWorkScope, viewModel.settings.colophon.isEnabled {
+                    Toggle("発行者を表示", isOn: colophonBinding(\.showsPublisherName))
+                    TextField("発行者", text: colophonBinding(\.publisherName))
+                        .disabled(!viewModel.settings.colophon.showsPublisherName)
+
+                    Toggle("作者名を表示", isOn: colophonBinding(\.showsAuthorName))
+                    TextField("作者名", text: colophonBinding(\.authorName))
+                        .disabled(!viewModel.settings.colophon.showsAuthorName)
+
+                    Toggle("サークル名を表示", isOn: colophonBinding(\.showsCircleName))
+                    TextField("サークル名", text: colophonBinding(\.circleName))
+                        .disabled(!viewModel.settings.colophon.showsCircleName)
+
+                    Toggle("URLを表示", isOn: colophonBinding(\.showsWebsiteURL))
+                    TextField("HP", text: colophonBinding(\.websiteURL))
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .disabled(!viewModel.settings.colophon.showsWebsiteURL)
+
                     Toggle("発行日を表示", isOn: colophonBinding(\.showsPublicationDate))
                     PublicationDateField(date: publicationDateOptionalBinding)
                         .disabled(!viewModel.settings.colophon.showsPublicationDate)

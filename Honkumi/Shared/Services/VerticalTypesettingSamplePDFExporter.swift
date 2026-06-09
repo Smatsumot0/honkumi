@@ -12,7 +12,7 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
             let exporter = BodyPDFExportService()
 
             for document in sampleDocuments() {
-                let temporaryURL = try exporter.export(document: document, subscriptionStatus: .paid)
+                let temporaryURL = try exporter.export(document: document, subscriptionStatus: .free)
                 let outputURL = destinationDirectory
                     .appendingPathComponent(document.title)
                     .appendingPathExtension("pdf")
@@ -41,6 +41,7 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
 
     private static func sampleDocuments() -> [ManuscriptDocument] {
         [
+            sampleDocument(title: "サンプル", orientation: .tateChuYoko),
             sampleDocument(title: "サンプル 英数字縦中央", orientation: .tateChuYoko),
             sampleDocument(title: "サンプル 英数字横倒し", orientation: .sideways)
         ]
@@ -60,11 +61,12 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
 
         var colophon = ColophonSettings.default
         colophon.isEnabled = true
+        colophon.publisherName = "山田太郎"
         colophon.authorName = "Honkumi確認用"
-        colophon.circleName = "縦書き組版テスト"
-        colophon.printerName = "確認用PDF出力"
-        colophon.publicationDate = Date(timeIntervalSince1970: 1_783_344_000)
-        colophon.websiteURL = "https://example.com/honkumi"
+        colophon.circleName = "サンプルサークル"
+        colophon.printerName = "サンプル印刷所"
+        colophon.publicationDate = samplePublicationDate
+        colophon.websiteURL = "https://example.com"
         colophon.contact = "typesetting@example.com"
         colophon.notes = "句読点・英数字・括弧・リーダー・奥付の確認用サンプルです。"
         settings.colophon = colophon
@@ -76,10 +78,25 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
         )
     }
 
+    private static var samplePublicationDate: Date {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 9 * 60 * 60)
+        components.year = 2026
+        components.month = 6
+        components.day = 3
+        return components.date ?? Date(timeIntervalSince1970: 0)
+    }
+
     private static let sampleBody = """
     [[toc]]
     [[CHAPTER: 句読点確認]]
     句読点の位置を確認します。本文中の、句点。全角コンマ，ピリオド．縦書き記号︑︒が右上に浮かないことを見ます。
+    きゃきゅきょ、しゃしゅしょ、ちゃちゅちょ、ぎゃぎゅぎょを続けて確認します。
+    あった、いっしょ、ちょっと、プレビュー、プレビューモードで小書き文字の大きさと位置を見ます。
+    今日は良い天気ですね。
+    そうやって、次に来る流れを予測しているのだろう。
+    空には白い雲がゆっくりと流れていた……。
     プレビュー、プレビュ、きゃ、しゅ、ちょ、あっ、ちょっと、きゃりー、シュッとした小書き文字を続けます。
     小書き仮名の確認として、ぁぃぅぇぉゃゅょっゎ、ァィゥェォャュョッヮヵヶを並べます。
     本文中の……。三点リーダーと句点の間隔、そして……連続したリーダーが分離しないことを確認します。

@@ -33,6 +33,34 @@ struct ColophonSettingsView: View {
 
     private var defaultColophonSection: some View {
         Section("奥付") {
+            colophonIdentityFields
+        }
+    }
+
+    private var activeWorkColophonSection: some View {
+        Section("奥付") {
+            Toggle("奥付を追加", isOn: colophonBinding(\.isEnabled))
+
+            if viewModel.settings.colophon.isEnabled {
+                colophonIdentityFields
+
+                Toggle("発行日を表示", isOn: colophonBinding(\.showsPublicationDate))
+                PublicationDateField(date: publicationDateOptionalBinding)
+                    .disabled(!viewModel.settings.colophon.showsPublicationDate)
+
+                Toggle("印刷所を表示", isOn: colophonBinding(\.showsPrinterName))
+                TextField("印刷所名", text: colophonBinding(\.printerName))
+                    .disabled(!viewModel.settings.colophon.showsPrinterName)
+            }
+        }
+    }
+
+    private var colophonIdentityFields: some View {
+        Group {
+            Toggle("発行者を表示", isOn: colophonBinding(\.showsPublisherName))
+            TextField("発行者", text: colophonBinding(\.publisherName))
+                .disabled(!viewModel.settings.colophon.showsPublisherName)
+
             Toggle("作者名を表示", isOn: colophonBinding(\.showsAuthorName))
             TextField("作者名", text: colophonBinding(\.authorName))
                 .disabled(!viewModel.settings.colophon.showsAuthorName)
@@ -62,22 +90,6 @@ struct ColophonSettingsView: View {
                 .autocorrectionDisabled()
             TextField("その他", text: colophonBinding(\.notes), axis: .vertical)
                 .lineLimit(3...6)
-        }
-    }
-
-    private var activeWorkColophonSection: some View {
-        Section("奥付") {
-            Toggle("奥付を追加", isOn: colophonBinding(\.isEnabled))
-
-            if viewModel.settings.colophon.isEnabled {
-                Toggle("発行日を表示", isOn: colophonBinding(\.showsPublicationDate))
-                PublicationDateField(date: publicationDateOptionalBinding)
-                    .disabled(!viewModel.settings.colophon.showsPublicationDate)
-
-                Toggle("印刷所を表示", isOn: colophonBinding(\.showsPrinterName))
-                TextField("印刷所名", text: colophonBinding(\.printerName))
-                    .disabled(!viewModel.settings.colophon.showsPrinterName)
-            }
         }
     }
 

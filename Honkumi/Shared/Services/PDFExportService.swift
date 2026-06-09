@@ -176,11 +176,11 @@ nonisolated struct BodyPDFExportService {
                 isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
             ),
             .foregroundColor: UIColor.black,
-            .kern: layout.settings.characterSpacing,
-            .verticalGlyphForm: 1
+            .kern: layout.settings.characterSpacing
         ]
         let lineCount = layout.settings.linesPerPage
         let characterCount = layout.settings.charactersPerLine
+        let cellHeight = layout.characterAdvance
 
         for displayIndex in (0..<lineCount).reversed() {
             let sourceColumn = columns.indices.contains(displayIndex) ? columns[displayIndex] : ""
@@ -208,7 +208,7 @@ nonisolated struct BodyPDFExportService {
                         characters: characters,
                         index: index,
                         columnWidth: layout.lineAdvance,
-                        rowHeight: rowAdvance
+                        rowHeight: cellHeight
                     )
                     let glyphAttributes = pdfAttributes(
                         for: glyph,
@@ -225,7 +225,7 @@ nonisolated struct BodyPDFExportService {
                         character,
                         cellOrigin: cellOrigin,
                         offset: offset,
-                        rowAdvance: rowAdvance,
+                        cellHeight: cellHeight,
                         in: layout
                     ) {
                         continue
@@ -235,7 +235,7 @@ nonisolated struct BodyPDFExportService {
                     let glyphSize = (glyph.text as NSString).size(withAttributes: glyphAttributes)
                     let drawPoint = CGPoint(
                         x: cellOrigin.x + (layout.lineAdvance - glyphSize.width) / 2 + offset.width,
-                        y: cellOrigin.y + (rowAdvance - glyphSize.height) / 2 + offset.height
+                        y: cellOrigin.y + (cellHeight - glyphSize.height) / 2 + offset.height
                     )
 
                     if glyph.rotationDegrees == 0 {
@@ -246,7 +246,7 @@ nonisolated struct BodyPDFExportService {
                                 glyphSize: glyphSize,
                                 cellOrigin: cellOrigin,
                                 offset: offset,
-                                rowAdvance: rowAdvance,
+                                cellHeight: cellHeight,
                                 in: layout
                             )
                         } else {
@@ -256,7 +256,7 @@ nonisolated struct BodyPDFExportService {
                         context.saveGState()
                         context.translateBy(
                             x: cellOrigin.x + layout.lineAdvance / 2 + offset.width,
-                            y: cellOrigin.y + rowAdvance / 2 + offset.height
+                            y: cellOrigin.y + cellHeight / 2 + offset.height
                         )
                         context.rotate(by: glyph.rotationDegrees * .pi / 180)
                         attributedText.draw(at: CGPoint(x: -glyphSize.width / 2, y: -glyphSize.height / 2))
@@ -273,7 +273,7 @@ nonisolated struct BodyPDFExportService {
         _ character: String,
         cellOrigin: CGPoint,
         offset: CGSize,
-        rowAdvance: CGFloat,
+        cellHeight: CGFloat,
         in layout: PageLayout
     ) -> Bool {
         guard VerticalTextTypesetter.isDashConnector(character),
@@ -282,9 +282,9 @@ nonisolated struct BodyPDFExportService {
         }
 
         let centerX = cellOrigin.x + layout.lineAdvance / 2 + offset.width
-        let overlap = rowAdvance * 0.08
+        let overlap = cellHeight * 0.08
         let startY = max(layout.bodyFrame.minY, cellOrigin.y - overlap)
-        let endY = min(layout.bodyFrame.maxY, cellOrigin.y + rowAdvance + overlap)
+        let endY = min(layout.bodyFrame.maxY, cellOrigin.y + cellHeight + overlap)
         let lineWidth = switch character {
         case "━":
             max(layout.fontSize * 0.13, 0.7)
@@ -309,7 +309,7 @@ nonisolated struct BodyPDFExportService {
         glyphSize: CGSize,
         cellOrigin: CGPoint,
         offset: CGSize,
-        rowAdvance: CGFloat,
+        cellHeight: CGFloat,
         in layout: PageLayout
     ) {
         let paragraphStyle = NSMutableParagraphStyle()
@@ -321,7 +321,7 @@ nonisolated struct BodyPDFExportService {
 
         let rect = CGRect(
             x: cellOrigin.x + offset.width,
-            y: cellOrigin.y + (rowAdvance - glyphSize.height) / 2 + offset.height,
+            y: cellOrigin.y + (cellHeight - glyphSize.height) / 2 + offset.height,
             width: layout.lineAdvance,
             height: max(glyphSize.height * 1.15, 1)
         )

@@ -42,14 +42,16 @@ struct VerticalTypesettingRegressionCheck {
         expect(ellipsisCells.count == 3, "double ellipsis should reserve two cells before punctuation")
         expect(ellipsisCells.first == ["……"], "double ellipsis should be drawn as one tight glyph run")
         expect(ellipsisCells.last == ["。"], "punctuation after ellipsis should keep its own cell")
+        expect(VerticalTextTypesetter.formsNonBreakingPair("……", "。"), "ellipsis and punctuation should not split")
 
         let commaGlyph = VerticalTextTypesetter.glyph(for: "、", alphanumericOrientation: .sideways)
-        expect(commaGlyph.xOffset < 0.24, "punctuation should be moved left from the old offset")
-        expect(commaGlyph.yOffset > -0.22, "punctuation should be moved down from the old offset")
+        expect(commaGlyph.xOffset <= 0, "punctuation should be moved left inside the cell")
+        expect(commaGlyph.yOffset >= 0.12, "punctuation should be lowered to match the reference")
 
         let smallKanaGlyph = VerticalTextTypesetter.glyph(for: "ュ", alphanumericOrientation: .sideways)
-        expect(smallKanaGlyph.xOffset < 0.16, "small kana should be moved left from the old offset")
-        expect(smallKanaGlyph.yOffset > -0.10, "small kana should be moved down from the old offset")
+        expect((0.70...0.80).contains(smallKanaGlyph.fontScale), "small kana should stay around 70-80 percent of body size")
+        expect(smallKanaGlyph.xOffset <= 0, "small kana should not drift to the right")
+        expect(smallKanaGlyph.yOffset >= 0.10, "small kana should be lowered to match the reference")
 
         let bracketGlyph = VerticalTextTypesetter.glyph(for: "【", alphanumericOrientation: .sideways)
         expect(bracketGlyph.text == "︻", "lenticular brackets should use vertical glyph forms")
@@ -64,6 +66,7 @@ struct VerticalTypesettingRegressionCheck {
             .layoutUnits(from: "だ!?」", alphanumericOrientation: .sideways)
             .map(\.text)
         expect(units == ["だ", "!?", "」"], "!? should stay paired before a closing bracket")
+        expect(VerticalTextTypesetter.formsNonBreakingPair("!?", "」"), "!? and closing quote should not split")
 
         guard failures.isEmpty else {
             fputs("Vertical typesetting regression check failed:\n", stderr)

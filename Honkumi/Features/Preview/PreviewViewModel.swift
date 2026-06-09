@@ -311,8 +311,14 @@ nonisolated enum ManuscriptPaginator {
                 centersInHorizontalLayout: true
             ),
             ColophonEntry(
-                id: "author",
+                id: "publisher",
                 label: "発行者",
+                value: colophon.showsPublisherName ? colophon.publisherName : "",
+                addsFollowingSpace: false
+            ),
+            ColophonEntry(
+                id: "author",
+                label: "作者",
                 value: colophon.showsAuthorName ? colophon.authorName : "",
                 addsFollowingSpace: false
             ),
@@ -403,9 +409,11 @@ nonisolated enum ManuscriptPaginator {
             alphanumericOrientation: settings.alphanumericOrientation
         )
         let leaderCount = max(settings.charactersPerLine - titleCellCount - pageNumberCellCount, 0)
-        let separator = String(repeating: "…", count: leaderCount)
+        let separator = String(repeating: tableOfContentsLeader, count: leaderCount)
         return entry.title + separator + pageNumber
     }
+
+    private static let tableOfContentsLeader = "︙"
 
     private static func tableOfContentsPageNumber(_ pageNumber: Int) -> String {
         String(pageNumber).map { character in
@@ -568,6 +576,10 @@ nonisolated enum ManuscriptPaginator {
             return true
         }
 
+        if leavesSingleBaseWithTrailingMarks(nextUnits) {
+            return true
+        }
+
         guard let nextText = nextUnits.first?.text,
               let nextCharacter = nextText.first.map(String.init),
               isPunctuation(nextCharacter),
@@ -578,6 +590,30 @@ nonisolated enum ManuscriptPaginator {
         }
 
         return true
+    }
+
+    private static func leavesSingleBaseWithTrailingMarks(_ nextUnits: [VerticalTextLayoutUnit]) -> Bool {
+        guard let firstUnit = nextUnits.first,
+              firstUnit.cellSpan == 1,
+              isSingleBaseCharacter(firstUnit.text),
+              !VerticalTextTypesetter.isLineStartProhibited(firstUnit.text) else {
+            return false
+        }
+
+        let trailingUnits = Array(nextUnits.dropFirst())
+        guard !trailingUnits.isEmpty else { return true }
+
+        var consumedCellCount = 0
+        for unit in trailingUnits.prefix(2) {
+            if VerticalTextTypesetter.isLineStartProhibited(unit.text)
+                || VerticalTextTypesetter.formsNonBreakingPair(firstUnit.text, unit.text) {
+                consumedCellCount += unit.cellSpan
+                continue
+            }
+            return false
+        }
+
+        return consumedCellCount > 0 && consumedCellCount <= 2
     }
 
     private static func appendHangingCharacters(
@@ -608,6 +644,13 @@ nonisolated enum ManuscriptPaginator {
 
     private static func isClosingQuote(_ character: String) -> Bool {
         ["」", "』", "）", "】", "〉", "》", "］", "｝"].contains(character)
+    }
+
+    private static func isSingleBaseCharacter(_ text: String) -> Bool {
+        text.count == 1
+            && !isPunctuation(text)
+            && !VerticalTextTypesetter.isSmallKana(text)
+            && !VerticalTextTypesetter.isDashLike(text)
     }
 
     private static let punctuationCharacters: Set<String> = [
