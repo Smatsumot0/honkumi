@@ -22,7 +22,9 @@ nonisolated struct PageLayout: Equatable {
 
     func effectivePageNumberPosition(isPageNumberFontUnlocked: Bool) -> PageNumberPosition {
         guard settings.isPageNumberEnabled else { return .hidden }
-        return settings.pageNumberPosition == .hidden ? .hidden : .outside
+        guard settings.pageNumberPosition != .hidden else { return .hidden }
+        guard isPageNumberFontUnlocked else { return .outside }
+        return settings.pageNumberPosition
     }
 
     func effectivePageNumberFontSize(isPageNumberFontUnlocked: Bool) -> CGFloat {
@@ -51,20 +53,57 @@ nonisolated struct PageLayout: Equatable {
         }
     }
 
-    private func pageNumberY(textHeight: CGFloat) -> CGFloat {
-        let rawY = pageHeight - marginBottom * 1.02 - textHeight * 0.15
-        return clampedFooterY(rawY, textHeight: textHeight)
+    func poweredByHonkumiOrigin(
+        textSize: CGSize,
+        pageNumberTextSize: CGSize?
+    ) -> CGPoint {
+        let maxY = pageHeight - Self.poweredByBottomInset - textSize.height
+        let pageNumberBottom = pageNumberTextSize.map {
+            pageNumberY(textHeight: $0.height) + $0.height
+        }
+        let minY = pageNumberBottom.map {
+            $0 + Self.footerItemGap
+        } ?? bodyFrame.maxY + Self.poweredByBodyGap
+        let y = max(maxY, minY)
+
+        return CGPoint(
+            x: pageWidth / 2 - textSize.width / 2,
+            y: clampedFooterY(y, textHeight: textSize.height, bottomInset: Self.poweredByBottomInset)
+        )
     }
 
-    private func clampedFooterY(_ y: CGFloat, textHeight: CGFloat) -> CGFloat {
-        let inset: CGFloat = 2
-        let maxY = pageHeight - textHeight - inset
-        return min(y, max(inset, maxY))
+    private func pageNumberY(textHeight: CGFloat) -> CGFloat {
+        let preferredY = bodyFrame.maxY + Self.pageNumberBodyGap
+        return clampedFooterY(preferredY, textHeight: textHeight, bottomInset: Self.pageNumberBottomInset)
+    }
+
+    private func clampedFooterY(
+        _ y: CGFloat,
+        textHeight: CGFloat,
+        bottomInset: CGFloat
+    ) -> CGFloat {
+        let minY = bodyFrame.maxY + Self.minimumFooterBodyGap
+        let maxY = pageHeight - textHeight - bottomInset
+        guard minY <= maxY else {
+            return max(Self.minimumPageEdgeInset, maxY)
+        }
+
+        return min(max(y, minY), maxY)
     }
 
     private func clampedFooterX(_ x: CGFloat, textWidth: CGFloat) -> CGFloat {
-        let inset: CGFloat = 2
+        let inset = Self.minimumPageEdgeInset
         let maxX = pageWidth - textWidth - inset
         return min(x, max(inset, maxX))
     }
+
+    static let poweredByHonkumiFontSize: CGFloat = 7
+
+    private static let minimumFooterBodyGap = LayoutCalculator.millimetersToPoints(4)
+    private static let pageNumberBodyGap = LayoutCalculator.millimetersToPoints(4.5)
+    private static let poweredByBodyGap = LayoutCalculator.millimetersToPoints(7)
+    private static let footerItemGap = LayoutCalculator.millimetersToPoints(1.6)
+    private static let minimumPageEdgeInset = LayoutCalculator.millimetersToPoints(3)
+    private static let pageNumberBottomInset = LayoutCalculator.millimetersToPoints(4)
+    private static let poweredByBottomInset = LayoutCalculator.millimetersToPoints(2)
 }

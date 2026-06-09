@@ -200,6 +200,7 @@ nonisolated enum ManuscriptPaginator {
             let lines = makeVerticalLines(
                 from: text,
                 charactersPerLine: settings.charactersPerLine,
+                alphanumericOrientation: settings.alphanumericOrientation,
                 indentsParagraphs: !segment.isTableOfContentsPlaceholder,
                 indentExemptLines: indentExemptLines(for: segment, settings: settings)
             )
@@ -305,23 +306,40 @@ nonisolated enum ManuscriptPaginator {
             ColophonEntry(
                 id: "creator",
                 label: "",
-                value: authorCircleText(authorName: colophon.authorName, circleName: colophon.circleName),
-                addsFollowingSpace: true,
+                value: "",
+                addsFollowingSpace: false,
                 centersInHorizontalLayout: true
+            ),
+            ColophonEntry(
+                id: "author",
+                label: "発行者",
+                value: colophon.showsAuthorName ? colophon.authorName : "",
+                addsFollowingSpace: false
+            ),
+            ColophonEntry(
+                id: "circle",
+                label: "サークル",
+                value: colophon.showsCircleName ? colophon.circleName : "",
+                addsFollowingSpace: true
             ),
             ColophonEntry(
                 id: "publicationDate",
                 label: "発行日",
-                value: colophon.formattedPublicationDate,
+                value: colophon.showsPublicationDate ? colophon.formattedPublicationDate : "",
                 addsFollowingSpace: false
             ),
             ColophonEntry(
                 id: "printer",
                 label: "印刷所",
-                value: colophon.printerName,
+                value: colophon.showsPrinterName ? colophon.printerName : "",
                 addsFollowingSpace: true
             ),
-            ColophonEntry(id: "hp", label: "HP", value: colophon.websiteURL, addsFollowingSpace: false),
+            ColophonEntry(
+                id: "hp",
+                label: "HP",
+                value: (colophon.showsWebsiteURL || colophon.showsQRCode) ? colophon.websiteURL : "",
+                addsFollowingSpace: false
+            ),
             ColophonEntry(id: "x", label: "x（旧Twitter）", value: colophon.xURL, addsFollowingSpace: false),
             ColophonEntry(id: "pixiv", label: "pixiv", value: colophon.pixivURL, addsFollowingSpace: false),
             ColophonEntry(id: "contact", label: "連絡先", value: colophon.contact, addsFollowingSpace: false),
@@ -333,20 +351,10 @@ nonisolated enum ManuscriptPaginator {
                 addsFollowingSpace: false
             )
         ].filter { entry in
-            if entry.id == "creator", colophon.hasCreatorImage {
-                return true
-            }
+            if entry.id == "creator" { return colophon.hasCreatorImage }
 
             return !entry.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-    }
-
-    private static func authorCircleText(authorName: String, circleName: String) -> String {
-        let values = [authorName, circleName]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        return values.joined(separator: "／")
     }
 
     private static func previewText(
@@ -374,7 +382,7 @@ nonisolated enum ManuscriptPaginator {
     private static func tableOfContentsText(entries: [TableOfContentsEntry], settings: EditorSettings) -> String {
         let title = tableOfContentsTitle(settings: settings)
         let lines = entries.map { entry in
-            "\(entry.title)　\(entry.pageNumber)"
+            tableOfContentsLine(for: entry, settings: settings)
         }
 
         guard !lines.isEmpty else {
@@ -382,6 +390,31 @@ nonisolated enum ManuscriptPaginator {
         }
 
         return ([title, ""] + lines).joined(separator: "\n")
+    }
+
+    private static func tableOfContentsLine(for entry: TableOfContentsEntry, settings: EditorSettings) -> String {
+        let pageNumber = tableOfContentsPageNumber(entry.pageNumber)
+        let titleCellCount = VerticalTextTypesetter.cellCount(
+            for: entry.title,
+            alphanumericOrientation: settings.alphanumericOrientation
+        )
+        let pageNumberCellCount = VerticalTextTypesetter.cellCount(
+            for: pageNumber,
+            alphanumericOrientation: settings.alphanumericOrientation
+        )
+        let leaderCount = max(settings.charactersPerLine - titleCellCount - pageNumberCellCount, 0)
+        let separator = String(repeating: "…", count: leaderCount)
+        return entry.title + separator + pageNumber
+    }
+
+    private static func tableOfContentsPageNumber(_ pageNumber: Int) -> String {
+        String(pageNumber).map { character in
+            guard let digit = character.wholeNumberValue else {
+                return String(character)
+            }
+            let scalar = UnicodeScalar(0xFF10 + digit)!
+            return String(Character(scalar))
+        }.joined()
     }
 
     private static func tableOfContentsTitle(settings: EditorSettings) -> String {
@@ -406,6 +439,7 @@ nonisolated enum ManuscriptPaginator {
     private static func makeVerticalLines(
         from text: String,
         charactersPerLine: Int,
+        alphanumericOrientation: AlphanumericOrientation,
         indentsParagraphs: Bool,
         indentExemptLines: Set<String>
     ) -> [String] {
@@ -423,7 +457,11 @@ nonisolated enum ManuscriptPaginator {
                 continue
             }
 
-            lines.append(contentsOf: wrappedVerticalLines(from: line, maxCharacters: maxCharacters))
+            lines.append(contentsOf: wrappedVerticalLines(
+                from: line,
+                maxCharacters: maxCharacters,
+                alphanumericOrientation: alphanumericOrientation
+            ))
         }
 
         return lines.isEmpty ? [""] : lines
@@ -459,86 +497,83 @@ nonisolated enum ManuscriptPaginator {
         return [formattedBodyChapterTitle(chapterTitle, settings: settings).trimmingCharacters(in: .whitespaces)]
     }
 
-    private static func wrappedVerticalLines(from line: String, maxCharacters: Int) -> [String] {
-        let characters = line.map(String.init)
+    private static func wrappedVerticalLines(
+        from line: String,
+        maxCharacters: Int,
+        alphanumericOrientation: AlphanumericOrientation
+    ) -> [String] {
+        let units = VerticalTextTypesetter.layoutUnits(
+            from: line,
+            alphanumericOrientation: alphanumericOrientation
+        )
         var wrappedLines: [String] = []
         var index = 0
 
-        while index < characters.count {
-            var currentLine: [String] = []
+        while index < units.count {
+            var currentLine: [VerticalTextLayoutUnit] = []
+            var currentCellCount = 0
 
-            while index < characters.count {
-                currentLine.append(characters[index])
-                index += 1
+            while index < units.count {
+                let unit = units[index]
+                let proposedCellCount = currentCellCount + unit.cellSpan
 
-                if cellCount(for: currentLine) > maxCharacters {
-                    index -= 1
-                    currentLine.removeLast()
+                if !currentLine.isEmpty, proposedCellCount > maxCharacters {
                     break
                 }
 
-                if cellCount(for: currentLine) >= maxCharacters {
+                currentLine.append(unit)
+                currentCellCount = proposedCellCount
+                index += 1
+
+                if currentCellCount >= maxCharacters {
                     break
                 }
             }
 
-            if index < characters.count {
-                if shouldMoveLastCharacterToNextLine(currentLine, nextCharacters: Array(characters[index...])) {
+            if index < units.count {
+                if shouldMoveLastUnitToNextLine(currentLine, nextUnits: Array(units[index...])) {
                     index -= 1
                     currentLine.removeLast()
                 } else {
                     appendHangingCharacters(
                         to: &currentLine,
-                        from: characters,
+                        from: units,
                         index: &index
                     )
                 }
             }
 
-            if currentLine.isEmpty, index < characters.count {
-                currentLine.append(characters[index])
+            if currentLine.isEmpty, index < units.count {
+                currentLine.append(units[index])
                 index += 1
             }
 
-            wrappedLines.append(currentLine.joined())
+            wrappedLines.append(currentLine.map(\.text).joined())
         }
 
         return wrappedLines
     }
 
-    private static func cellCount(for characters: [String]) -> Int {
-        var count = 0
-        var index = 0
-
-        while index < characters.count {
-            if isPunctuation(characters[index]),
-               characters.indices.contains(index + 1),
-               isClosingQuote(characters[index + 1]) {
-                count += 1
-                index += 2
-            } else {
-                count += 1
-                index += 1
-            }
-        }
-
-        return count
-    }
-
-    private static func shouldMoveLastCharacterToNextLine(
-        _ currentLine: [String],
-        nextCharacters: [String]
+    private static func shouldMoveLastUnitToNextLine(
+        _ currentLine: [VerticalTextLayoutUnit],
+        nextUnits: [VerticalTextLayoutUnit]
     ) -> Bool {
         guard currentLine.count > 1 else { return false }
 
-        if isLineEndProhibited(currentLine.last) {
+        if VerticalTextTypesetter.isLineEndProhibited(currentLine.last?.text) {
             return true
         }
 
-        guard let nextCharacter = nextCharacters.first,
+        if nextUnitsCellCount(nextUnits) == 1 {
+            return true
+        }
+
+        guard let nextText = nextUnits.first?.text,
+              let nextCharacter = nextText.first.map(String.init),
               isPunctuation(nextCharacter),
-              nextCharacters.indices.contains(1),
-              isClosingQuote(nextCharacters[1]) else {
+              nextUnits.indices.contains(1),
+              let followingCharacter = nextUnits[1].text.first.map(String.init),
+              isClosingQuote(followingCharacter) else {
             return false
         }
 
@@ -546,16 +581,16 @@ nonisolated enum ManuscriptPaginator {
     }
 
     private static func appendHangingCharacters(
-        to currentLine: inout [String],
-        from characters: [String],
+        to currentLine: inout [VerticalTextLayoutUnit],
+        from units: [VerticalTextLayoutUnit],
         index: inout Int
     ) {
-        while index < characters.count {
-            let nextCharacter = characters[index]
+        while index < units.count {
+            let nextUnit = units[index]
 
-            if isLineStartProhibited(nextCharacter)
-                || formsNonBreakingPair(currentLine.last, nextCharacter) {
-                currentLine.append(nextCharacter)
+            if VerticalTextTypesetter.isLineStartProhibited(nextUnit.text)
+                || VerticalTextTypesetter.formsNonBreakingPair(currentLine.last?.text, nextUnit.text) {
+                currentLine.append(nextUnit)
                 index += 1
             } else {
                 break
@@ -563,19 +598,8 @@ nonisolated enum ManuscriptPaginator {
         }
     }
 
-    private static func isLineStartProhibited(_ character: String?) -> Bool {
-        guard let character else { return false }
-        return lineStartProhibitedCharacters.contains(character)
-    }
-
-    private static func isLineEndProhibited(_ character: String?) -> Bool {
-        guard let character else { return false }
-        return lineEndProhibitedCharacters.contains(character)
-    }
-
-    private static func formsNonBreakingPair(_ first: String?, _ second: String) -> Bool {
-        guard let first else { return false }
-        return nonBreakingPairs.contains(first + second)
+    private static func nextUnitsCellCount(_ units: [VerticalTextLayoutUnit]) -> Int {
+        units.reduce(0) { $0 + $1.cellSpan }
     }
 
     private static func isPunctuation(_ character: String) -> Bool {
@@ -583,31 +607,11 @@ nonisolated enum ManuscriptPaginator {
     }
 
     private static func isClosingQuote(_ character: String) -> Bool {
-        ["」", "』"].contains(character)
-    }
-
-    private static func isEllipsis(_ character: String) -> Bool {
-        ["…", "‥"].contains(character)
+        ["」", "』", "）", "】", "〉", "》", "］", "｝"].contains(character)
     }
 
     private static let punctuationCharacters: Set<String> = [
-        "、", "。", "，", "．", "､", "｡"
-    ]
-
-    private static let lineStartProhibitedCharacters: Set<String> = [
-        "、", "。", "，", "．", "・", "：", "；", "！", "？",
-        "」", "』", "）", "】", "》", "〉", "］", "｝",
-        "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ",
-        "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ",
-        "ー", "─", "々", "ゝ", "ゞ"
-    ]
-
-    private static let lineEndProhibitedCharacters: Set<String> = [
-        "「", "『", "（", "【", "《", "〈", "［", "｛"
-    ]
-
-    private static let nonBreakingPairs: Set<String> = [
-        "……", "──", "――", "——", "！？", "？！", "!!", "??", "!?", "?!"
+        "、", "。", "，", "．", "､", "｡", "︑", "︒", "︐"
     ]
 }
 
@@ -620,23 +624,41 @@ nonisolated struct TableOfContentsEntry: Equatable {
 final class PreviewViewModel: ObservableObject {
     @Published private(set) var document: ManuscriptDocument
     @Published private(set) var pages: [PreviewPage]
+    @Published private(set) var isPaginating = false
 
     private let documentStore: DocumentStore
     private var cancellables = Set<AnyCancellable>()
     private var paginationTask: Task<Void, Never>?
     private var paginationGeneration = 0
+    private var layoutCacheSettings: EditorSettings?
+    private var layoutCache: [Int: PageLayout] = [:]
+    private var isPreviewActive = false
 
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
         self.document = documentStore.document
         self.pages = [PreviewPage(columns: [""], startsAfterPageBreak: false, chapterTitle: nil)]
-        schedulePagination(for: documentStore.document, debounceMilliseconds: 0)
 
         documentStore.$document
             .sink { [weak self] document in
                 guard let self else { return }
                 self.document = document
-                self.schedulePagination(for: document, debounceMilliseconds: 250)
+                self.clearLayoutCacheIfNeeded(for: document.settings.validated)
+                if self.isPreviewActive {
+                    self.schedulePagination(for: document, debounceMilliseconds: 350)
+                } else {
+                    self.cancelInactivePagination()
+                }
+            }
+            .store(in: &cancellables)
+
+        documentStore.$appData
+            .map(\.subscriptionStatus)
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                guard self.isPreviewActive else { return }
+                self.schedulePagination(for: self.documentStore.document, debounceMilliseconds: 0)
             }
             .store(in: &cancellables)
     }
@@ -658,7 +680,36 @@ final class PreviewViewModel: ObservableObject {
     }
 
     func layout(for pageNumber: Int) -> PageLayout {
-        LayoutCalculator.layout(for: document.settings, pageNumber: pageNumber)
+        let settings = document.settings.validated
+        clearLayoutCacheIfNeeded(for: settings)
+        if let cachedLayout = layoutCache[pageNumber] {
+            return cachedLayout
+        }
+
+        let layout = LayoutCalculator.layout(for: settings, pageNumber: pageNumber)
+        layoutCache[pageNumber] = layout
+        return layout
+    }
+
+    func preparePreviewIfNeeded() {
+        guard isPreviewActive else { return }
+        schedulePagination(for: documentStore.document, debounceMilliseconds: 0)
+    }
+
+    func setPreviewActive(_ isActive: Bool) {
+        guard isPreviewActive != isActive else {
+            if isActive {
+                preparePreviewIfNeeded()
+            }
+            return
+        }
+
+        isPreviewActive = isActive
+        if isActive {
+            preparePreviewIfNeeded()
+        } else {
+            cancelInactivePagination()
+        }
     }
 
     private func schedulePagination(for document: ManuscriptDocument, debounceMilliseconds: UInt64) {
@@ -666,6 +717,21 @@ final class PreviewViewModel: ObservableObject {
         paginationGeneration += 1
         let generation = paginationGeneration
         let documentSnapshot = document
+        let subscriptionStatus = documentStore.subscriptionStatus
+
+        if let cachedResult = ManuscriptRenderPipeline.cachedPaginationResult(
+            for: documentSnapshot,
+            subscriptionStatus: subscriptionStatus
+        ) {
+            applyPagination(
+                result: cachedResult,
+                generation: generation,
+                documentID: documentSnapshot.id
+            )
+            return
+        }
+
+        isPaginating = true
 
         paginationTask = Task.detached(priority: .utility) { [weak self] in
             if debounceMilliseconds > 0 {
@@ -673,19 +739,37 @@ final class PreviewViewModel: ObservableObject {
                 guard !Task.isCancelled else { return }
             }
 
-            let pages = ManuscriptPaginator.pages(for: documentSnapshot)
+            let result = ManuscriptRenderPipeline.paginationResult(
+                for: documentSnapshot,
+                subscriptionStatus: subscriptionStatus
+            )
             guard !Task.isCancelled else { return }
 
             await self?.applyPagination(
-                pages: pages,
+                result: result,
                 generation: generation,
                 documentID: documentSnapshot.id
             )
         }
     }
 
-    private func applyPagination(pages: [PreviewPage], generation: Int, documentID: UUID) {
+    private func applyPagination(result: ManuscriptPaginationResult, generation: Int, documentID: UUID) {
         guard paginationGeneration == generation, document.id == documentID else { return }
-        self.pages = pages
+        self.document = result.document
+        clearLayoutCacheIfNeeded(for: result.document.settings.validated)
+        self.pages = result.pages
+        self.isPaginating = false
+    }
+
+    private func cancelInactivePagination() {
+        paginationTask?.cancel()
+        paginationTask = nil
+        isPaginating = false
+    }
+
+    private func clearLayoutCacheIfNeeded(for settings: EditorSettings) {
+        guard layoutCacheSettings != settings else { return }
+        layoutCacheSettings = settings
+        layoutCache.removeAll(keepingCapacity: true)
     }
 }

@@ -78,32 +78,26 @@ private struct WorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("画面切り替え", selection: $selectedSection) {
-                ForEach(AppSection.allCases) { section in
-                    Label(section.title, systemImage: section.systemImage)
-                        .tag(section)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 10)
-            .background(.bar)
+            sectionTabs
 
             if selectedSection == .preview {
                 HStack {
                     Button {
                         showsPreviewGuides.toggle()
                     } label: {
-                        Label("ガイド表示", systemImage: showsPreviewGuides ? "ruler.fill" : "ruler")
+                        Image(systemName: showsPreviewGuides ? "ruler.fill" : "ruler")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 30, height: 28)
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .tint(showsPreviewGuides ? .accentColor : nil)
                     .accessibilityLabel(showsPreviewGuides ? "ガイドを非表示" : "ガイドを表示")
 
                     Spacer()
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding(.bottom, 10)
                 .background(.bar)
             }
 
@@ -170,9 +164,6 @@ private struct WorkspaceView: View {
                     guard result.canContinue else { return }
                     preflightResult = nil
                     exportPDF()
-                },
-                onCancel: {
-                    preflightResult = nil
                 }
             )
         }
@@ -184,6 +175,41 @@ private struct WorkspaceView: View {
         } message: {
             Text(exportErrorMessage)
         }
+        .onAppear {
+            previewViewModel.setPreviewActive(selectedSection == .preview)
+        }
+        .onChange(of: selectedSection) { _, section in
+            previewViewModel.setPreviewActive(section == .preview)
+        }
+    }
+
+    private var sectionTabs: some View {
+        HStack(spacing: 3) {
+            ForEach(AppSection.allCases) { section in
+                let isSelected = selectedSection == section
+                Button {
+                    selectedSection = section
+                } label: {
+                    Text(section.title)
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .background {
+                    Capsule(style: .continuous)
+                        .fill(isSelected ? Color(.secondarySystemFill) : Color.clear)
+                }
+                .accessibilityLabel(section.title)
+            }
+        }
+        .padding(2)
+        .background(Color(.tertiarySystemFill), in: Capsule(style: .continuous))
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     private func runPreflightBeforeExport() {

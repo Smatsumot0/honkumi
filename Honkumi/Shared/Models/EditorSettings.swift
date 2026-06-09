@@ -33,6 +33,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
     var showChapterTitle: Bool
     var chapterTitleStyle: ChapterTitleStyle
     var startsChapterOnNewPage: Bool
+    var alphanumericOrientation: AlphanumericOrientation
     var colophon: ColophonSettings
     var formatSettings: FormatSettings
 
@@ -56,6 +57,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
         showChapterTitle: Bool,
         chapterTitleStyle: ChapterTitleStyle,
         startsChapterOnNewPage: Bool,
+        alphanumericOrientation: AlphanumericOrientation = .stacked,
         colophon: ColophonSettings = .default,
         formatSettings: FormatSettings = .default
     ) {
@@ -78,6 +80,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
         self.showChapterTitle = showChapterTitle
         self.chapterTitleStyle = chapterTitleStyle
         self.startsChapterOnNewPage = startsChapterOnNewPage
+        self.alphanumericOrientation = alphanumericOrientation
         self.colophon = colophon
         self.formatSettings = formatSettings
     }
@@ -97,11 +100,12 @@ nonisolated struct EditorSettings: Codable, Equatable {
         isPageNumberEnabled: true,
         pageNumberFontId: nil,
         pageNumberSize: 7,
-        pageNumberPosition: .center,
+        pageNumberPosition: .outside,
         showTableOfContents: false,
         showChapterTitle: false,
         chapterTitleStyle: .plain,
         startsChapterOnNewPage: false,
+        alphanumericOrientation: .stacked,
         colophon: .default,
         formatSettings: .default
     )
@@ -127,6 +131,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
             showChapterTitle: showChapterTitle,
             chapterTitleStyle: chapterTitleStyle,
             startsChapterOnNewPage: startsChapterOnNewPage,
+            alphanumericOrientation: alphanumericOrientation,
             colophon: colophon.validated,
             formatSettings: formatSettings.validated
         )
@@ -155,6 +160,7 @@ nonisolated extension EditorSettings {
         case showChapterTitle
         case chapterTitleStyle
         case startsChapterOnNewPage
+        case alphanumericOrientation
         case colophon
         case formatSettings
     }
@@ -191,6 +197,7 @@ nonisolated extension EditorSettings {
             showChapterTitle: try container.decodeIfPresent(Bool.self, forKey: .showChapterTitle) ?? defaults.showChapterTitle,
             chapterTitleStyle: try container.decodeIfPresent(ChapterTitleStyle.self, forKey: .chapterTitleStyle) ?? defaults.chapterTitleStyle,
             startsChapterOnNewPage: try container.decodeIfPresent(Bool.self, forKey: .startsChapterOnNewPage) ?? defaults.startsChapterOnNewPage,
+            alphanumericOrientation: try container.decodeIfPresent(AlphanumericOrientation.self, forKey: .alphanumericOrientation) ?? defaults.alphanumericOrientation,
             colophon: try container.decodeIfPresent(ColophonSettings.self, forKey: .colophon) ?? defaults.colophon,
             formatSettings: try container.decodeIfPresent(FormatSettings.self, forKey: .formatSettings) ?? defaults.formatSettings
         )
@@ -217,6 +224,7 @@ nonisolated extension EditorSettings {
         try container.encode(showChapterTitle, forKey: .showChapterTitle)
         try container.encode(chapterTitleStyle, forKey: .chapterTitleStyle)
         try container.encode(startsChapterOnNewPage, forKey: .startsChapterOnNewPage)
+        try container.encode(alphanumericOrientation, forKey: .alphanumericOrientation)
         try container.encode(colophon, forKey: .colophon)
         try container.encode(formatSettings, forKey: .formatSettings)
     }
@@ -327,6 +335,12 @@ nonisolated struct ColophonSettings: Codable, Equatable {
     var authorImageData: Data?
     var circleImageData: Data?
     var usesCircleImageForCreator: Bool
+    var showsAuthorName: Bool
+    var showsCircleName: Bool
+    var showsWebsiteURL: Bool
+    var showsQRCode: Bool
+    var showsPublicationDate: Bool
+    var showsPrinterName: Bool
     var publicationDate: Date?
     var printerName: String
     var websiteURL: String
@@ -344,6 +358,12 @@ nonisolated struct ColophonSettings: Codable, Equatable {
         authorImageData: nil,
         circleImageData: nil,
         usesCircleImageForCreator: false,
+        showsAuthorName: true,
+        showsCircleName: true,
+        showsWebsiteURL: true,
+        showsQRCode: true,
+        showsPublicationDate: true,
+        showsPrinterName: true,
         publicationDate: nil,
         printerName: "",
         websiteURL: "",
@@ -363,6 +383,12 @@ nonisolated struct ColophonSettings: Codable, Equatable {
             authorImageData: authorImageData,
             circleImageData: circleImageData,
             usesCircleImageForCreator: usesCircleImageForCreator,
+            showsAuthorName: showsAuthorName,
+            showsCircleName: showsCircleName,
+            showsWebsiteURL: showsWebsiteURL,
+            showsQRCode: showsQRCode,
+            showsPublicationDate: showsPublicationDate,
+            showsPrinterName: showsPrinterName,
             publicationDate: publicationDate,
             printerName: printerName.trimmedForStorage,
             websiteURL: websiteURL.trimmedForStorage,
@@ -382,9 +408,28 @@ nonisolated struct ColophonSettings: Codable, Equatable {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "yyyy年M月d日"
+        formatter.dateFormat = "yyyy/MM/dd"
         return formatter
     }()
+}
+
+nonisolated enum AlphanumericOrientation: String, Codable, CaseIterable, Identifiable {
+    case stacked
+    case sideways
+    case tateChuYoko
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .stacked:
+            "縦積み"
+        case .sideways:
+            "横倒し"
+        case .tateChuYoko:
+            "縦中横"
+        }
+    }
 }
 
 nonisolated enum ColophonWritingDirection: String, Codable, CaseIterable, Identifiable {
@@ -422,6 +467,12 @@ nonisolated extension ColophonSettings {
         case authorImageData
         case circleImageData
         case usesCircleImageForCreator
+        case showsAuthorName
+        case showsCircleName
+        case showsWebsiteURL
+        case showsQRCode
+        case showsPublicationDate
+        case showsPrinterName
         case publicationDate
         case printerName
         case websiteURL
@@ -444,6 +495,12 @@ nonisolated extension ColophonSettings {
             authorImageData: try container.decodeIfPresent(Data.self, forKey: .authorImageData),
             circleImageData: try container.decodeIfPresent(Data.self, forKey: .circleImageData),
             usesCircleImageForCreator: try container.decodeIfPresent(Bool.self, forKey: .usesCircleImageForCreator) ?? defaults.usesCircleImageForCreator,
+            showsAuthorName: try container.decodeIfPresent(Bool.self, forKey: .showsAuthorName) ?? defaults.showsAuthorName,
+            showsCircleName: try container.decodeIfPresent(Bool.self, forKey: .showsCircleName) ?? defaults.showsCircleName,
+            showsWebsiteURL: try container.decodeIfPresent(Bool.self, forKey: .showsWebsiteURL) ?? defaults.showsWebsiteURL,
+            showsQRCode: try container.decodeIfPresent(Bool.self, forKey: .showsQRCode) ?? defaults.showsQRCode,
+            showsPublicationDate: try container.decodeIfPresent(Bool.self, forKey: .showsPublicationDate) ?? defaults.showsPublicationDate,
+            showsPrinterName: try container.decodeIfPresent(Bool.self, forKey: .showsPrinterName) ?? defaults.showsPrinterName,
             publicationDate: Self.decodePublicationDate(from: container),
             printerName: try container.decodeIfPresent(String.self, forKey: .printerName) ?? defaults.printerName,
             websiteURL: try container.decodeIfPresent(String.self, forKey: .websiteURL) ?? defaults.websiteURL,

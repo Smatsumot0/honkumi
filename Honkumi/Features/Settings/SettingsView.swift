@@ -66,24 +66,6 @@ struct SettingsView: View {
                     update: viewModel.updateFontSize
                 )
 
-                valueStepper(
-                    title: "行間",
-                    value: viewModel.settings.lineSpacing,
-                    range: EditorSettings.lineSpacingRange,
-                    step: 0.5,
-                    format: "%.1f pt",
-                    update: viewModel.updateLineSpacing
-                )
-
-                valueStepper(
-                    title: "字間",
-                    value: viewModel.settings.characterSpacing,
-                    range: EditorSettings.characterSpacingRange,
-                    step: 0.5,
-                    format: "%.1f pt",
-                    update: viewModel.updateCharacterSpacing
-                )
-
                 intStepper(
                     title: "1行あたり",
                     value: viewModel.settings.charactersPerLine,
@@ -99,6 +81,15 @@ struct SettingsView: View {
                     range: EditorSettings.linesPerPageRange,
                     update: viewModel.updateLinesPerPage
                 )
+
+                Picker("英数字", selection: Binding(
+                    get: { viewModel.settings.alphanumericOrientation },
+                    set: { viewModel.updateAlphanumericOrientation($0) }
+                )) {
+                    ForEach(AlphanumericOrientation.allCases) { orientation in
+                        Text(orientation.displayName).tag(orientation)
+                    }
+                }
             }
 
             Section("余白") {
@@ -169,27 +160,13 @@ struct SettingsView: View {
                 Toggle("奥付を追加", isOn: colophonBinding(\.isEnabled))
 
                 if viewModel.isActiveWorkScope, viewModel.settings.colophon.isEnabled {
-                    if viewModel.settings.colophon.publicationDate != nil {
-                        DatePicker(
-                            "発行日",
-                            selection: publicationDateBinding,
-                            displayedComponents: .date
-                        )
-                        Button("発行日を空欄にする") {
-                            viewModel.updateColophon { colophon in
-                                colophon.publicationDate = nil
-                            }
-                        }
-                        .foregroundStyle(.secondary)
-                    } else {
-                        Button("発行日を入力") {
-                            viewModel.updateColophon { colophon in
-                                colophon.publicationDate = Date()
-                            }
-                        }
-                    }
+                    Toggle("発行日を表示", isOn: colophonBinding(\.showsPublicationDate))
+                    PublicationDateField(date: publicationDateOptionalBinding)
+                        .disabled(!viewModel.settings.colophon.showsPublicationDate)
 
+                    Toggle("印刷所を表示", isOn: colophonBinding(\.showsPrinterName))
                     TextField("印刷所名", text: colophonBinding(\.printerName))
+                        .disabled(!viewModel.settings.colophon.showsPrinterName)
                 }
             }
 
@@ -212,7 +189,12 @@ struct SettingsView: View {
                 .disabled(!viewModel.isPageNumberFontUnlocked)
 
                 Picker("表示位置", selection: Binding(
-                    get: { viewModel.settings.pageNumberPosition == .hidden ? .outside : viewModel.settings.pageNumberPosition },
+                    get: {
+                        guard viewModel.isPageNumberFontUnlocked else { return .outside }
+                        return viewModel.settings.pageNumberPosition == .hidden
+                            ? .outside
+                            : viewModel.settings.pageNumberPosition
+                    },
                     set: { viewModel.updatePageNumberPosition($0) }
                 )) {
                     ForEach(PageNumberPosition.allCases.filter { $0 != .hidden }) { position in
@@ -533,9 +515,9 @@ struct SettingsView: View {
         )
     }
 
-    private var publicationDateBinding: Binding<Date> {
+    private var publicationDateOptionalBinding: Binding<Date?> {
         Binding(
-            get: { viewModel.settings.colophon.publicationDate ?? Date() },
+            get: { viewModel.settings.colophon.publicationDate },
             set: { newValue in
                 viewModel.updateColophon { colophon in
                     colophon.publicationDate = newValue

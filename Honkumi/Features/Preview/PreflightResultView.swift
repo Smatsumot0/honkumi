@@ -6,7 +6,6 @@ struct PreflightResultView: View {
     let onReturnToFix: () -> Void
     let onAutoFixAndContinue: () -> Void
     let onIgnoreWarningsAndContinue: () -> Void
-    let onCancel: () -> Void
 
     private var problemIssues: [PreflightIssue] {
         result.issues.filter { $0.severity == .error || $0.severity == .warning }
@@ -48,30 +47,49 @@ struct PreflightResultView: View {
                         }
                     }
                 }
-
-                Section {
-                    Button("戻って修正") {
-                        onReturnToFix()
-                    }
-
-                    Button("自動修正して続行") {
-                        onAutoFixAndContinue()
-                    }
-                    .disabled(result.autoFixableIssues.isEmpty)
-
-                    Button("警告を無視して続行") {
-                        onIgnoreWarningsAndContinue()
-                    }
-                    .disabled(!result.canContinue)
-
-                    Button("キャンセル", role: .cancel) {
-                        onCancel()
-                    }
-                }
             }
             .navigationTitle("入稿チェック")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                actionFooter
+            }
         }
+    }
+
+    private var actionFooter: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    onReturnToFix()
+                } label: {
+                    Text("戻って修正")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    onAutoFixAndContinue()
+                } label: {
+                    Text("自動修正")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(result.autoFixableIssues.isEmpty)
+            }
+
+            Button {
+                onIgnoreWarningsAndContinue()
+            } label: {
+                Text("警告を無視して続行")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!result.canContinue)
+        }
+        .padding(.horizontal)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(.bar)
     }
 
     private func issueRow(_ issue: PreflightIssue) -> some View {

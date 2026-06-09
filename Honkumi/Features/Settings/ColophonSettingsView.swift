@@ -33,14 +33,22 @@ struct ColophonSettingsView: View {
 
     private var defaultColophonSection: some View {
         Section("奥付") {
+            Toggle("作者名を表示", isOn: colophonBinding(\.showsAuthorName))
             TextField("作者名", text: colophonBinding(\.authorName))
+                .disabled(!viewModel.settings.colophon.showsAuthorName)
+
+            Toggle("サークル名を表示", isOn: colophonBinding(\.showsCircleName))
             TextField("サークル名", text: colophonBinding(\.circleName))
+                .disabled(!viewModel.settings.colophon.showsCircleName)
             circleLogoControls
 
+            Toggle("URLを表示", isOn: colophonBinding(\.showsWebsiteURL))
+            Toggle("QRコードを表示", isOn: colophonBinding(\.showsQRCode))
             TextField("HP", text: colophonBinding(\.websiteURL))
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .disabled(!viewModel.settings.colophon.showsWebsiteURL && !viewModel.settings.colophon.showsQRCode)
             TextField("x（旧Twitter）", text: colophonBinding(\.xURL))
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
@@ -62,27 +70,13 @@ struct ColophonSettingsView: View {
             Toggle("奥付を追加", isOn: colophonBinding(\.isEnabled))
 
             if viewModel.settings.colophon.isEnabled {
-                if viewModel.settings.colophon.publicationDate != nil {
-                    DatePicker(
-                        "発行日",
-                        selection: publicationDateBinding,
-                        displayedComponents: .date
-                    )
-                    Button("発行日を空欄にする") {
-                        viewModel.updateColophon { colophon in
-                            colophon.publicationDate = nil
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                } else {
-                    Button("発行日を入力") {
-                        viewModel.updateColophon { colophon in
-                            colophon.publicationDate = Date()
-                        }
-                    }
-                }
+                Toggle("発行日を表示", isOn: colophonBinding(\.showsPublicationDate))
+                PublicationDateField(date: publicationDateOptionalBinding)
+                    .disabled(!viewModel.settings.colophon.showsPublicationDate)
 
+                Toggle("印刷所を表示", isOn: colophonBinding(\.showsPrinterName))
                 TextField("印刷所名", text: colophonBinding(\.printerName))
+                    .disabled(!viewModel.settings.colophon.showsPrinterName)
             }
         }
     }
@@ -179,9 +173,9 @@ struct ColophonSettingsView: View {
         )
     }
 
-    private var publicationDateBinding: Binding<Date> {
+    private var publicationDateOptionalBinding: Binding<Date?> {
         Binding(
-            get: { viewModel.settings.colophon.publicationDate ?? Date() },
+            get: { viewModel.settings.colophon.publicationDate },
             set: { newValue in
                 viewModel.updateColophon { colophon in
                     colophon.publicationDate = newValue

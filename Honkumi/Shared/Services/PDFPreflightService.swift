@@ -82,13 +82,15 @@ nonisolated struct PDFPreflightService {
     func check(document: ManuscriptDocument, subscriptionStatus: SubscriptionStatus) -> PreflightResult {
         let settings = document.settings
         let validatedSettings = settings.validated
-        let effectiveDocument = effectiveExportDocument(
-            from: document,
-            settings: validatedSettings,
+        var checkedDocument = document
+        checkedDocument.settings = validatedSettings
+        let paginationResult = ManuscriptRenderPipeline.paginationResult(
+            for: checkedDocument,
             subscriptionStatus: subscriptionStatus
         )
+        let effectiveDocument = paginationResult.document
         let parsed = ManuscriptMarkupParser.parse(document.body)
-        let pages = ManuscriptPaginator.pages(for: effectiveDocument)
+        let pages = paginationResult.pages
         var issues: [PreflightIssue] = []
 
         checkBody(document.body, parsed: parsed, settings: validatedSettings, into: &issues)
@@ -129,21 +131,6 @@ nonisolated struct PDFPreflightService {
             subscriptionStatus: subscriptionStatus
         ).validated
         return fixedDocument
-    }
-
-    private func effectiveExportDocument(
-        from document: ManuscriptDocument,
-        settings: EditorSettings,
-        subscriptionStatus: SubscriptionStatus
-    ) -> ManuscriptDocument {
-        var exportDocument = document
-        exportDocument.settings = settings
-        exportDocument.body = ManuscriptFormatter.formatManuscriptText(
-            document.body,
-            settings: settings.formatSettings,
-            options: FormatOptions(isPremiumUser: subscriptionStatus == .paid)
-        )
-        return exportDocument
     }
 
     private func checkBody(
@@ -331,8 +318,6 @@ nonisolated struct PDFPreflightService {
         checkRange(settings.marginInner, range: EditorSettings.marginInnerRange, key: "marginInner", title: "ノドの余白が範囲外です", unit: "mm", into: &issues)
         checkRange(settings.marginOuter, range: EditorSettings.marginOuterRange, key: "marginOuter", title: "小口の余白が範囲外です", unit: "mm", into: &issues)
         checkRange(settings.fontSize, range: EditorSettings.fontSizeRange, key: "fontSize", title: "文字サイズが範囲外です", unit: "pt", into: &issues)
-        checkRange(settings.lineSpacing, range: EditorSettings.lineSpacingRange, key: "lineSpacing", title: "行間が範囲外です", unit: "pt", into: &issues)
-        checkRange(settings.characterSpacing, range: EditorSettings.characterSpacingRange, key: "characterSpacing", title: "字間が範囲外です", unit: "pt", into: &issues)
         checkRange(CGFloat(settings.linesPerPage), range: CGFloat(EditorSettings.linesPerPageRange.lowerBound)...CGFloat(EditorSettings.linesPerPageRange.upperBound), key: "linesPerPage", title: "1ページあたりの行数が範囲外です", unit: "行", into: &issues)
         checkRange(CGFloat(settings.charactersPerLine), range: CGFloat(EditorSettings.charactersPerLineRange.lowerBound)...CGFloat(EditorSettings.charactersPerLineRange.upperBound), key: "charactersPerLine", title: "1行あたりの文字数が範囲外です", unit: "文字", into: &issues)
 

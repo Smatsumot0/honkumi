@@ -12,6 +12,7 @@ struct PreviewView: View {
     @Binding var showsFacingPages: Bool
     @Binding var showsGuides: Bool
     @State private var restoresScrollPosition = true
+    @State private var visiblePageLimit = PreviewStyle.initialVisiblePageLimit
 
     private var pagePreviewScale: CGFloat {
         PreviewStyle.basePageScale
@@ -19,6 +20,9 @@ struct PreviewView: View {
 
     var body: some View {
         let pages = viewModel.pages
+        let pageLimit = displayedPageLimit(totalPageCount: pages.count)
+        let visiblePages = Array(pages.prefix(pageLimit))
+        let hasMorePages = pageLimit < pages.count
 
         ZoomablePreviewScrollView(
             zoomScale: $pageScale,
@@ -26,12 +30,10 @@ struct PreviewView: View {
             minimumZoomScale: PreviewStyle.pageScaleRange.lowerBound,
             maximumZoomScale: PreviewStyle.pageScaleRange.upperBound
         ) {
-            ZStack(alignment: .topLeading) {
-                PreviewStyle.canvasBackground(colorScheme)
-
+            Group {
                 if showsFacingPages {
                     LazyVStack(spacing: PreviewStyle.facingSpreadSpacing) {
-                        ForEach(pageSpreads(for: pages), id: \.firstPageNumber) { spread in
+                        ForEach(pageSpreads(for: visiblePages), id: \.firstPageNumber) { spread in
                             HStack(alignment: .top, spacing: PreviewStyle.facingPageSpacing) {
                                 ForEach(Array(spread.items.enumerated()), id: \.offset) { _, item in
                                     if let page = item.page, let pageNumber = item.pageNumber {
@@ -46,30 +48,109 @@ struct PreviewView: View {
                                     }
                                 }
                             }
-                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        }
+
+                        if hasMorePages {
+                            loadMorePagesTrigger
                         }
                     }
                     .padding(.vertical)
                     .padding(.horizontal, PreviewStyle.facingHorizontalPadding)
                 } else {
                     LazyVStack(spacing: 20) {
-                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                        ForEach(Array(visiblePages.enumerated()), id: \.offset) { index, page in
                             pageStack(page, pageNumber: index + 1, totalPageCount: pages.count)
                                 .id(index + 1)
+                        }
+
+                        if hasMorePages {
+                            loadMorePagesTrigger
                         }
                     }
                     .padding()
                 }
             }
+            .background(PreviewStyle.canvasBackground(colorScheme))
             .frame(minWidth: 1, minHeight: 1, alignment: .top)
             .coordinateSpace(name: PreviewStyle.scrollCoordinateSpaceName)
         }
         .background(PreviewStyle.canvasBackground(colorScheme))
+        .overlay(alignment: .top) {
+            if viewModel.isPaginating {
+                loadingBanner
+                    .padding(.top, 12)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if hasMorePages {
+                bottomLoadingBanner
+                    .padding(.bottom, 14)
+            }
+        }
         .onAppear {
             restoresScrollPosition = false
         }
         .onChange(of: pages.count) { _, count in
             focusedPage = min(max(focusedPage, 1), max(count, 1))
+            visiblePageLimit = min(PreviewStyle.initialVisiblePageLimit, max(count, 1))
+        }
+    }
+
+    private var loadingBanner: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("プレビューを準備中")
+                .font(.caption.weight(.medium))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar, in: Capsule())
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+        .accessibilityLabel("プレビューを準備中")
+    }
+
+    private var bottomLoadingBanner: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("読み込み中")
+                .font(.caption.weight(.medium))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar, in: Capsule())
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+        .accessibilityLabel("読み込み中")
+    }
+
+    private var loadMorePagesTrigger: some View {
+        Color.clear
+            .frame(height: 1)
+            .accessibilityHidden(true)
+            .onAppear {
+                revealMorePages()
+            }
+    }
+
+    private func displayedPageLimit(totalPageCount: Int) -> Int {
+        guard totalPageCount > 0 else { return 0 }
+        var limit = min(max(visiblePageLimit, 1), totalPageCount)
+        if showsFacingPages, limit > 1, limit.isMultiple(of: 2), limit < totalPageCount {
+            limit += 1
+        }
+        return min(limit, totalPageCount)
+    }
+
+    private func revealMorePages() {
+        let nextLimit = min(
+            visiblePageLimit + PreviewStyle.visiblePageBatchSize,
+            max(viewModel.pages.count, 1)
+        )
+        guard nextLimit > visiblePageLimit else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            visiblePageLimit = nextLimit
         }
     }
 
@@ -173,7 +254,7 @@ struct PreviewView: View {
             pageNumberView(pageNumber, layout: layout)
 
             if shouldShowPoweredByHonkumi(page: page, pageNumber: pageNumber, totalPageCount: totalPageCount) {
-                poweredByHonkumiView(page: page, layout: layout)
+                poweredByHonkumiView(page: page, pageNumber: pageNumber, layout: layout)
             }
         }
         .frame(
@@ -284,7 +365,9 @@ struct PreviewView: View {
         let qrSize = min(layout.bodyFrame.width * 0.22, 44) * pagePreviewScale
         let rowHeights = entries.map { entry -> CGFloat in
             if entry.id == "hp", !colophon.websiteURL.isEmpty {
-                return qrSize + 6 * pagePreviewScale + lineHeight
+                return colophon.showsQRCode
+                    ? qrSize + (colophon.showsWebsiteURL ? 6 * pagePreviewScale + lineHeight : 0)
+                    : lineHeight
             }
 
             if entry.id == "creator", viewModel.subscriptionStatus == .paid, colophon.hasCreatorImage {
@@ -313,7 +396,9 @@ struct PreviewView: View {
                     .frame(maxWidth: maxWidth, maxHeight: imageHeight)
             }
 
-            let authorName = colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let authorName = colophon.showsAuthorName
+                ? colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
+                : ""
             if !authorName.isEmpty {
                 Text(authorName)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -327,7 +412,8 @@ struct PreviewView: View {
         layout: PageLayout,
         lineHeight: CGFloat
     ) -> CGFloat {
-        let hasAuthorName = !colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasAuthorName = colophon.showsAuthorName
+            && !colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return creatorImageHeight(layout: layout) + (hasAuthorName ? 4 * pagePreviewScale + lineHeight : 0)
     }
 
@@ -337,7 +423,7 @@ struct PreviewView: View {
 
     @ViewBuilder
     private func verticalColophonQRCodeView(_ colophon: ColophonSettings, layout: PageLayout) -> some View {
-        if let image = qrCodeImage(for: colophon.websiteURL) {
+        if colophon.showsQRCode, let image = qrCodeImage(for: colophon.websiteURL) {
             let metrics = verticalHorizontalColophonMetrics(layout: layout)
             let fontSize = max(layout.fontSize * pagePreviewScale, 7)
             let urlWidth = (colophon.websiteURL as NSString).size(withAttributes: [
@@ -361,7 +447,7 @@ struct PreviewView: View {
         let contactEntries = entries.filter { $0.id != "hp" }
 
         return ZStack(alignment: .topLeading) {
-            if let hpEntry = entries.first(where: { $0.id == "hp" }) {
+            if colophon.showsWebsiteURL, let hpEntry = entries.first(where: { $0.id == "hp" }) {
                 verticalHorizontalColophonRow(hpEntry, metrics: metrics)
                     .offset(x: metrics.blockX, y: metrics.blockY + metrics.qrSize + 6 * pagePreviewScale)
             }
@@ -417,7 +503,7 @@ struct PreviewView: View {
         labelWidth: CGFloat,
         layout: PageLayout
     ) -> some View {
-        if let image = qrCodeImage(for: colophon.websiteURL) {
+        if colophon.showsQRCode, let image = qrCodeImage(for: colophon.websiteURL) {
             let fontSize = max(layout.fontSize * pagePreviewScale, 7)
             let size = min(layout.bodyFrame.width * 0.22, 44) * pagePreviewScale
             let urlWidth = (entry.value as NSString).size(withAttributes: [
@@ -437,8 +523,10 @@ struct PreviewView: View {
                         .frame(width: size, height: size)
                         .padding(.leading, max((urlWidth - size) / 2, 0))
                         .accessibilityLabel("HPのQRコード")
-                    Text(entry.value)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if colophon.showsWebsiteURL {
+                        Text(entry.value)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         } else {
@@ -452,29 +540,35 @@ struct PreviewView: View {
         }
     }
 
-    private func poweredByHonkumiView(page: PreviewPage, layout: PageLayout) -> some View {
-        let rawY: CGFloat = switch page.kind {
-        case .body:
-            layout.pageHeight - layout.marginBottom * PreviewStyle.poweredByBodyBottomMultiplier
-        case .colophon:
-            layout.pageHeight - layout.marginBottom * PreviewStyle.poweredByColophonBottomMultiplier
-        }
-        let y = clampedFooterYOffset(
-            rawY * pagePreviewScale,
-            pageHeight: layout.pageHeight * pagePreviewScale,
-            textHeight: PreviewStyle.poweredByTextHeight
+    private func poweredByHonkumiView(page: PreviewPage, pageNumber: Int, layout: PageLayout) -> some View {
+        let text = "Powered by Honkumi"
+        let font = AppFontCatalog.uiFont(
+            selectedFontId: layout.settings.selectedFontId,
+            size: PageLayout.poweredByHonkumiFontSize,
+            isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked
         )
+        let textSize = (text as NSString).size(withAttributes: [.font: font])
+        let pageNumberSize = pageNumberTextSizeIfVisible(pageNumber, layout: layout)
+        let origin = layout.poweredByHonkumiOrigin(
+            textSize: textSize,
+            pageNumberTextSize: pageNumberSize
+        )
+        let frameHeight = max(textSize.height * pagePreviewScale, PreviewStyle.poweredByTextHeight)
 
-        return Text("Powered by Honkumi")
-            .font(.system(size: max(5, layout.fontSize * 0.48 * pagePreviewScale)))
+        return Text(text)
+            .font(AppFontCatalog.swiftUIFont(
+                selectedFontId: layout.settings.selectedFontId,
+                size: PageLayout.poweredByHonkumiFontSize * pagePreviewScale,
+                isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked
+            ))
             .foregroundStyle(.primary)
             .lineLimit(1)
             .frame(
                 width: layout.pageWidth * pagePreviewScale,
-                height: PreviewStyle.poweredByTextHeight,
+                height: frameHeight,
                 alignment: .top
             )
-            .offset(x: 0, y: y)
+            .offset(x: 0, y: origin.y * pagePreviewScale)
     }
 
     private func shouldShowPoweredByHonkumi(
@@ -528,15 +622,15 @@ struct PreviewView: View {
     private func pageNumberView(_ pageNumber: Int, layout: PageLayout) -> some View {
         let position = layout.effectivePageNumberPosition(isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked)
         if layout.settings.isPageNumberEnabled, position != .hidden {
-            let fontSize = pageNumberFontSize(layout: layout)
-            let textSize = CGSize(
-                width: PreviewStyle.pageNumberWidth / pagePreviewScale,
-                height: max(PreviewStyle.pageNumberTextHeight / pagePreviewScale, fontSize * 1.4 / pagePreviewScale)
-            )
+            let unscaledFontSize = layout.effectivePageNumberFontSize(isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked)
+            let fontSize = unscaledFontSize * pagePreviewScale
+            let textSize = pageNumberTextSize(pageNumber, layout: layout)
             let origin = layout.pageNumberOrigin(
                 textSize: textSize,
                 isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked
             )
+            let frameWidth = max(textSize.width * pagePreviewScale, PreviewStyle.pageNumberWidth * pagePreviewScale)
+            let frameHeight = max(textSize.height * pagePreviewScale, PreviewStyle.pageNumberTextHeight * pagePreviewScale)
             Text("\(pageNumber)")
                 .font(AppFontCatalog.pageNumberSwiftUIFont(
                     pageNumberFontId: layout.settings.pageNumberFontId,
@@ -547,8 +641,8 @@ struct PreviewView: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .frame(
-                    width: PreviewStyle.pageNumberWidth * pagePreviewScale,
-                    height: max(PreviewStyle.pageNumberTextHeight, fontSize * 1.4),
+                    width: frameWidth,
+                    height: frameHeight,
                     alignment: .top
                 )
                 .offset(
@@ -558,8 +652,20 @@ struct PreviewView: View {
         }
     }
 
-    private func pageNumberFontSize(layout: PageLayout) -> CGFloat {
-        layout.effectivePageNumberFontSize(isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked) * pagePreviewScale
+    private func pageNumberTextSizeIfVisible(_ pageNumber: Int, layout: PageLayout) -> CGSize? {
+        let position = layout.effectivePageNumberPosition(isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked)
+        guard layout.settings.isPageNumberEnabled, position != .hidden else { return nil }
+        return pageNumberTextSize(pageNumber, layout: layout)
+    }
+
+    private func pageNumberTextSize(_ pageNumber: Int, layout: PageLayout) -> CGSize {
+        let font = AppFontCatalog.pageNumberUIFont(
+            pageNumberFontId: layout.settings.pageNumberFontId,
+            bodyFontId: layout.settings.selectedFontId,
+            size: layout.effectivePageNumberFontSize(isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked),
+            isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked
+        )
+        return ("\(pageNumber)" as NSString).size(withAttributes: [.font: font])
     }
 
     private func clampedFooterYOffset(_ y: CGFloat, pageHeight: CGFloat, textHeight: CGFloat) -> CGFloat {
@@ -578,8 +684,11 @@ struct PreviewView: View {
         return HStack(alignment: .top, spacing: 0) {
             ForEach((0..<lineCount).reversed(), id: \.self) { displayIndex in
                 let column = columns.indices.contains(displayIndex) ? columns[displayIndex] : ""
-                let cells = verticalCells(from: column, characterCount: characterCount)
-                let adjustedRowAdvance = adjustedCharacterAdvance(
+                let cells = VerticalTextTypesetter.cells(
+                    from: column,
+                    alphanumericOrientation: layout.settings.alphanumericOrientation
+                )
+                let adjustedRowAdvance = VerticalTextTypesetter.adjustedCharacterAdvance(
                     cellCount: cells.count,
                     characterCount: characterCount,
                     bodyHeight: bodyHeight,
@@ -593,7 +702,8 @@ struct PreviewView: View {
                             selectedFontId: layout.settings.selectedFontId,
                             fontSize: visibleFontSize,
                             columnWidth: columnWidth,
-                            rowHeight: rowHeight
+                            rowHeight: rowHeight,
+                            alphanumericOrientation: layout.settings.alphanumericOrientation
                         )
                         .offset(y: CGFloat(rowIndex) * adjustedRowAdvance)
                     }
@@ -622,155 +732,48 @@ struct PreviewView: View {
         selectedFontId: String,
         fontSize: CGFloat,
         columnWidth: CGFloat,
-        rowHeight: CGFloat
+        rowHeight: CGFloat,
+        alphanumericOrientation: AlphanumericOrientation
     ) -> some View {
         ZStack {
             ForEach(Array(characters.enumerated()), id: \.offset) { index, character in
-                let glyph = verticalGlyph(for: character)
+                let glyph = VerticalTextTypesetter.glyph(
+                    for: character,
+                    alphanumericOrientation: alphanumericOrientation
+                )
+                let offset = VerticalTextTypesetter.glyphOffset(
+                    glyph: glyph,
+                    character: character,
+                    characters: characters,
+                    index: index,
+                    columnWidth: columnWidth,
+                    rowHeight: rowHeight
+                )
 
-                Text(glyph.text)
-                    .font(AppFontCatalog.swiftUIFont(
-                        selectedFontId: selectedFontId,
-                        size: fontSize * glyph.fontScale,
-                        isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked
-                    ))
-                    .rotationEffect(.degrees(glyph.rotationDegrees))
-                    .offset(glyphOffset(
-                        glyph: glyph,
-                        character: character,
-                        characters: characters,
-                        index: index,
-                        columnWidth: columnWidth,
-                        rowHeight: rowHeight
-                    ))
+                if VerticalTextTypesetter.isDashConnector(character) {
+                    Rectangle()
+                        .fill(Color.primary)
+                        .frame(
+                            width: max(fontSize * 0.08, 0.45 * pagePreviewScale),
+                            height: rowHeight * 1.16
+                        )
+                        .offset(offset)
+                } else {
+                    Text(glyph.text)
+                        .font(AppFontCatalog.swiftUIFont(
+                            selectedFontId: selectedFontId,
+                            size: fontSize * glyph.fontScale,
+                            isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked
+                        ))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(width: columnWidth, height: rowHeight)
+                        .rotationEffect(.degrees(glyph.rotationDegrees))
+                        .offset(offset)
+                }
             }
         }
         .frame(width: columnWidth, height: rowHeight)
-    }
-
-    private func glyphOffset(
-        glyph: VerticalGlyph,
-        character: String,
-        characters: [String],
-        index: Int,
-        columnWidth: CGFloat,
-        rowHeight: CGFloat
-    ) -> CGSize {
-        let normalized: CGPoint
-
-        if index > 0, glyph.isPunctuation, characters.first.map(isPunctuation) == false {
-            normalized = CGPoint(x: glyph.xOffset, y: 0.38)
-        } else if index > 0, isClosingQuote(character), characters.first.map(isPunctuation) == false {
-            normalized = CGPoint(x: -0.02, y: 0.34)
-        } else if index > 0, isClosingQuote(character), characters.first.map(isPunctuation) == true {
-            normalized = CGPoint(x: -0.02, y: 0.34)
-        } else {
-            normalized = CGPoint(
-                x: glyph.xOffset,
-                y: glyph.yOffset + overflowYOffset(index: index, glyph: glyph)
-            )
-        }
-
-        return CGSize(width: normalized.x * columnWidth, height: normalized.y * rowHeight)
-    }
-
-    private func verticalCells(from column: String, characterCount: Int) -> [[String]] {
-        let characters = column.map(String.init)
-        var cells: [[String]] = []
-        var index = 0
-
-        while index < characters.count {
-            let character = characters[index]
-            if isPunctuation(character),
-               characters.indices.contains(index + 1),
-               isClosingQuote(characters[index + 1]) {
-                cells.append([character, characters[index + 1]])
-                index += 2
-            } else {
-                cells.append([character])
-                index += 1
-            }
-        }
-
-        return cells
-    }
-
-    private func overflowYOffset(index: Int, glyph: VerticalGlyph) -> CGFloat {
-        guard index > 0 else { return 0 }
-        return glyph.isPunctuation ? 0.38 : -0.18 * CGFloat(index)
-    }
-
-    private func verticalGlyph(for character: String) -> VerticalGlyph {
-        switch character {
-        case "「":
-            VerticalGlyph("﹁", fontScale: 0.82)
-        case "」":
-            VerticalGlyph("﹂", fontScale: 0.82)
-        case "『":
-            VerticalGlyph("﹃", fontScale: 0.82)
-        case "』":
-            VerticalGlyph("﹄", fontScale: 0.82)
-        case "（":
-            VerticalGlyph("︵", fontScale: 0.82)
-        case "）":
-            VerticalGlyph("︶", fontScale: 0.82)
-        case "(":
-            VerticalGlyph("︵", fontScale: 0.82)
-        case ")":
-            VerticalGlyph("︶", fontScale: 0.82)
-        case "【":
-            VerticalGlyph("︻", fontScale: 0.82)
-        case "】":
-            VerticalGlyph("︼", fontScale: 0.82)
-        case "［", "[":
-            VerticalGlyph("﹇", fontScale: 0.82)
-        case "］", "]":
-            VerticalGlyph("﹈", fontScale: 0.82)
-        case "｛", "{":
-            VerticalGlyph("︷", fontScale: 0.82)
-        case "｝", "}":
-            VerticalGlyph("︸", fontScale: 0.82)
-        case "〈":
-            VerticalGlyph("︿", fontScale: 0.82)
-        case "〉":
-            VerticalGlyph("﹀", fontScale: 0.82)
-        case "《":
-            VerticalGlyph("︽", fontScale: 0.82)
-        case "》":
-            VerticalGlyph("︾", fontScale: 0.82)
-        case "…", "‥":
-            VerticalGlyph("︙", fontScale: 0.86)
-        case "〜", "～":
-            VerticalGlyph("︴", fontScale: 0.9)
-        case "、", "。", "､", "｡", "，", "．":
-            VerticalGlyph(character, fontScale: 0.66, xOffset: 0.38, yOffset: -0.40, isPunctuation: true)
-        case "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ",
-             "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ":
-            VerticalGlyph(character, fontScale: 0.74, xOffset: 0.16, yOffset: -0.10)
-        case "―", "─", "—", "ｰ", "ー":
-            VerticalGlyph("｜", fontScale: 0.78)
-        default:
-            VerticalGlyph(character)
-        }
-    }
-
-    private func isEllipsis(_ character: String) -> Bool {
-        ["…", "‥"].contains(character)
-    }
-
-    private func isPunctuation(_ character: String) -> Bool {
-        ["、", "。", "､", "｡", "，", "．"].contains(character)
-    }
-
-    private func isClosingQuote(_ character: String) -> Bool {
-        ["」", "』"].contains(character)
-    }
-
-    private func isLineStartProhibited(_ character: String) -> Bool {
-        [
-            "、", "。", "，", "．", "・", "：", "；", "！", "？",
-            "」", "』", "）", "】", "》", "〉", "］", "｝"
-        ].contains(character)
     }
 
     private func layoutGuide(_ layout: PageLayout, pageNumber: Int) -> some View {
@@ -829,7 +832,9 @@ struct PreviewView: View {
 }
 
 private enum PreviewStyle {
-    static let basePageScale: CGFloat = 0.6
+    static let initialVisiblePageLimit = 25
+    static let visiblePageBatchSize = 20
+    static let basePageScale: CGFloat = 0.52
     static let scrollCoordinateSpaceName = "previewScroll"
     static let pageScaleRange: ClosedRange<CGFloat> = 1...3.2
     static func canvasBackground(_ colorScheme: ColorScheme) -> Color {
@@ -846,7 +851,7 @@ private enum PreviewStyle {
 
     static let paperBorderWidth: CGFloat = 0.7
     static let pageCornerRadius: CGFloat = 4
-    static let facingPageSpacing: CGFloat = 3
+    static let facingPageSpacing: CGFloat = 14
     static let facingSpreadSpacing: CGFloat = 14
     static let facingHorizontalPadding: CGFloat = 20
     static let bodyAreaFillColor = Color(hex: 0x2F80ED).opacity(0.045)
@@ -1042,31 +1047,6 @@ private struct ZoomablePreviewScrollView<Content: View>: UIViewRepresentable {
                 parent.contentOffset = currentOffset
             }
         }
-    }
-}
-
-private struct VerticalGlyph: Equatable {
-    let text: String
-    let rotationDegrees: Double
-    let fontScale: CGFloat
-    let xOffset: CGFloat
-    let yOffset: CGFloat
-    let isPunctuation: Bool
-
-    init(
-        _ text: String,
-        rotationDegrees: Double = 0,
-        fontScale: CGFloat = 1,
-        xOffset: CGFloat = 0,
-        yOffset: CGFloat = 0,
-        isPunctuation: Bool = false
-    ) {
-        self.text = text
-        self.rotationDegrees = rotationDegrees
-        self.fontScale = fontScale
-        self.xOffset = xOffset
-        self.yOffset = yOffset
-        self.isPunctuation = isPunctuation
     }
 }
 

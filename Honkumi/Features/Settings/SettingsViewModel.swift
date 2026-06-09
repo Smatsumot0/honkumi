@@ -151,6 +151,12 @@ final class SettingsViewModel: ObservableObject {
         settings = updated
     }
 
+    func updateAlphanumericOrientation(_ value: AlphanumericOrientation) {
+        var updated = settings
+        updated.alphanumericOrientation = value
+        settings = updated
+    }
+
     func updateShowTableOfContents(_ value: Bool) {
         var updated = settings
         updated.showTableOfContents = value
@@ -158,6 +164,7 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func updatePageNumberPosition(_ value: PageNumberPosition) {
+        guard isPageNumberFontUnlocked else { return }
         var updated = settings
         updated.pageNumberPosition = value
         updated.isPageNumberEnabled = value != .hidden
