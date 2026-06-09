@@ -10,9 +10,11 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
         do {
             let destinationDirectory = try sampleOutputDirectory()
             let exporter = BodyPDFExportService()
+            let publisherSettings = samplePublisherSettings()
 
             for document in sampleDocuments() {
-                let temporaryURL = try exporter.export(document: document, subscriptionStatus: .free)
+                let outputDocument = document.applyingPublisherInfo(from: publisherSettings)
+                let temporaryURL = try exporter.export(document: outputDocument, subscriptionStatus: .free)
                 let outputURL = destinationDirectory
                     .appendingPathComponent(document.title)
                     .appendingPathExtension("pdf")
@@ -61,14 +63,8 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
 
         var colophon = ColophonSettings.default
         colophon.isEnabled = true
-        colophon.publisherName = "山田太郎"
-        colophon.authorName = "Honkumi確認用"
-        colophon.circleName = "サンプルサークル"
         colophon.printerName = "サンプル印刷所"
         colophon.publicationDate = samplePublicationDate
-        colophon.websiteURL = "https://example.com"
-        colophon.contact = "typesetting@example.com"
-        colophon.notes = "句読点・英数字・括弧・リーダー・奥付の確認用サンプルです。"
         settings.colophon = colophon
 
         return ManuscriptDocument(
@@ -76,6 +72,19 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
             body: sampleBody,
             settings: settings
         )
+    }
+
+    private static func samplePublisherSettings() -> EditorSettings {
+        var settings = EditorSettings.default.validated
+        var colophon = ColophonSettings.default
+        colophon.publisherName = "山田太郎"
+        colophon.authorName = "Honkumi確認用"
+        colophon.circleName = "サンプルサークル"
+        colophon.websiteURL = "https://example.com"
+        colophon.contact = "typesetting@example.com"
+        colophon.notes = "句読点・英数字・括弧・リーダー・奥付の確認用サンプルです。"
+        settings.colophon = colophon
+        return settings
     }
 
     private static var samplePublicationDate: Date {
@@ -103,7 +112,7 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
     [[PAGE_BREAK]]
     [[CHAPTER: 英数字確認]]
     TypeScriptとNext.js、React、Hello World、abcdef、ABCDEF、1234567890を本文の中で確認します。
-    12は縦中横、123と1234567890は連続したランとして読みやすく配置されることを確認します。
+    12、123、1234567890などの半角数字は横倒しのランとして配置されることを確認します。
     API Client v2.1.0やfoo_bar-baz/test+demo&copyも、半角英数字と記号のランだけが横倒しになります。
     日本語本文、全角数字１２３４５、全角記号！？「」は通常の縦書きのまま残します。
     [[PAGE_BREAK]]

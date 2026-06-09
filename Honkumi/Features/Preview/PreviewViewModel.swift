@@ -679,16 +679,17 @@ final class PreviewViewModel: ObservableObject {
 
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
-        self.document = documentStore.document
+        self.document = documentStore.document.applyingPublisherInfo(from: documentStore.userDefaultSettings)
         self.pages = [PreviewPage(columns: [""], startsAfterPageBreak: false, chapterTitle: nil)]
 
         documentStore.$document
             .sink { [weak self] document in
                 guard let self else { return }
-                self.document = document
-                self.clearLayoutCacheIfNeeded(for: document.settings.validated)
+                let previewDocument = self.previewDocument(from: document)
+                self.document = previewDocument
+                self.clearLayoutCacheIfNeeded(for: previewDocument.settings.validated)
                 if self.isPreviewActive {
-                    self.schedulePagination(for: document, debounceMilliseconds: 350)
+                    self.schedulePagination(for: previewDocument, debounceMilliseconds: 350)
                 } else {
                     self.cancelInactivePagination()
                 }
@@ -696,12 +697,17 @@ final class PreviewViewModel: ObservableObject {
             .store(in: &cancellables)
 
         documentStore.$appData
-            .map(\.subscriptionStatus)
-            .removeDuplicates()
+            .map { ($0.userDefaultSettings, $0.subscriptionStatus) }
+            .removeDuplicates { previous, current in
+                previous.0 == current.0 && previous.1 == current.1
+            }
             .sink { [weak self] _ in
                 guard let self else { return }
+                let previewDocument = self.previewDocument(from: self.documentStore.document)
+                self.document = previewDocument
+                self.clearLayoutCacheIfNeeded(for: previewDocument.settings.validated)
                 guard self.isPreviewActive else { return }
-                self.schedulePagination(for: self.documentStore.document, debounceMilliseconds: 0)
+                self.schedulePagination(for: previewDocument, debounceMilliseconds: 0)
             }
             .store(in: &cancellables)
     }
@@ -736,7 +742,7 @@ final class PreviewViewModel: ObservableObject {
 
     func preparePreviewIfNeeded() {
         guard isPreviewActive else { return }
-        schedulePagination(for: documentStore.document, debounceMilliseconds: 0)
+        schedulePagination(for: previewDocument(from: documentStore.document), debounceMilliseconds: 0)
     }
 
     func setPreviewActive(_ isActive: Bool) {
@@ -794,6 +800,10 @@ final class PreviewViewModel: ObservableObject {
                 documentID: documentSnapshot.id
             )
         }
+    }
+
+    private func previewDocument(from document: ManuscriptDocument) -> ManuscriptDocument {
+        document.applyingPublisherInfo(from: documentStore.userDefaultSettings)
     }
 
     private func applyPagination(result: ManuscriptPaginationResult, generation: Int, documentID: UUID) {

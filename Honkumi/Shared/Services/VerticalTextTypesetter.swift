@@ -47,17 +47,17 @@ nonisolated struct VerticalGlyphAdjustment: Equatable {
 
 nonisolated enum VerticalGlyphMetrics {
     static let punctuation = VerticalGlyphAdjustment(
-        fontScale: 0.62,
-        xOffset: -0.03,
-        yOffset: 0.16
+        fontScale: 0.64,
+        xOffset: 0.10,
+        yOffset: -0.04
     )
     static let punctuationAfterBaseYOffset: CGFloat = 0.30
     static let punctuationOverflowYOffset: CGFloat = 0.30
 
     static let smallKana = VerticalGlyphAdjustment(
         fontScale: 0.76,
-        xOffset: -0.04,
-        yOffset: 0.12
+        xOffset: 0.06,
+        yOffset: -0.06
     )
 
     static let bracketFontScale: CGFloat = 0.88
@@ -74,11 +74,6 @@ nonisolated enum VerticalGlyphMetrics {
 }
 
 nonisolated enum VerticalTextTypesetter {
-    private enum AlphanumericPlacement {
-        case uprightCentered
-        case sideways
-    }
-
     static func cells(
         from column: String,
         alphanumericOrientation: AlphanumericOrientation
@@ -119,10 +114,7 @@ nonisolated enum VerticalTextTypesetter {
                 let run = halfWidthRun(in: characters, startingAt: index)
                 units.append(VerticalTextLayoutUnit(
                     run.text,
-                    cellSpan: alphanumericCellSpan(
-                        for: run.text,
-                        alphanumericOrientation: alphanumericOrientation
-                    )
+                    cellSpan: alphanumericCellSpan(for: run.text)
                 ))
                 index = run.endIndex
             } else if isPunctuation(character),
@@ -183,24 +175,15 @@ nonisolated enum VerticalTextTypesetter {
             )
         }
 
-        if isAlphanumericRun(character), character.count > 1 {
-            switch alphanumericPlacement(for: character, alphanumericOrientation: alphanumericOrientation) {
-            case .sideways:
-                let reservedCellCount = sidewaysRunCellSpan(for: character)
-                return VerticalGlyphLayout(
-                    character,
-                    rotationDegrees: 90,
-                    fontScale: VerticalGlyphMetrics.sidewaysAlphanumericFontScale,
-                    yOffset: VerticalGlyphMetrics.centeredRunYOffset(cellSpan: reservedCellCount),
-                    disablesCharacterSpacing: true
-                )
-            case .uprightCentered:
-                return VerticalGlyphLayout(
-                    character,
-                    fontScale: VerticalGlyphMetrics.tateChuYokoFontScale,
-                    disablesCharacterSpacing: true
-                )
-            }
+        if isAlphanumericRun(character) {
+            let reservedCellCount = sidewaysRunCellSpan(for: character)
+            return VerticalGlyphLayout(
+                character,
+                rotationDegrees: 90,
+                fontScale: VerticalGlyphMetrics.sidewaysAlphanumericFontScale,
+                yOffset: VerticalGlyphMetrics.centeredRunYOffset(cellSpan: reservedCellCount),
+                disablesCharacterSpacing: true
+            )
         }
 
         if isEllipsisRun(character) {
@@ -430,33 +413,8 @@ nonisolated enum VerticalTextTypesetter {
         return chunks
     }
 
-    private static func alphanumericCellSpan(
-        for text: String,
-        alphanumericOrientation: AlphanumericOrientation
-    ) -> Int {
-        switch alphanumericPlacement(for: text, alphanumericOrientation: alphanumericOrientation) {
-        case .uprightCentered:
-            return 1
-        case .sideways:
-            return sidewaysRunCellSpan(for: text)
-        }
-    }
-
-    private static func alphanumericPlacement(
-        for text: String,
-        alphanumericOrientation: AlphanumericOrientation
-    ) -> AlphanumericPlacement {
-        switch alphanumericOrientation {
-        case .sideways:
-            return .sideways
-        case .stacked, .tateChuYoko:
-            return isShortASCIIDigitRun(text) ? .uprightCentered : .sideways
-        }
-    }
-
-    private static func isShortASCIIDigitRun(_ text: String) -> Bool {
-        let characters = text.map(String.init)
-        return (1...2).contains(characters.count) && characters.allSatisfy(isASCIIDigit)
+    private static func alphanumericCellSpan(for text: String) -> Int {
+        sidewaysRunCellSpan(for: text)
     }
 
     private static func sidewaysRunCellSpan(for text: String) -> Int {
@@ -485,13 +443,6 @@ nonisolated enum VerticalTextTypesetter {
         default:
             0.56
         }
-    }
-
-    private static func isASCIIDigit(_ character: String) -> Bool {
-        character.unicodeScalars.count == 1
-            && character.unicodeScalars.allSatisfy { scalar in
-                scalar.value >= 48 && scalar.value <= 57
-            }
     }
 
     private static func isHalfWidthRunStart(_ character: String) -> Bool {

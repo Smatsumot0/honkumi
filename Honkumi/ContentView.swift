@@ -216,7 +216,7 @@ private struct WorkspaceView: View {
         guard !isExportingPDF else { return }
         isExportingPDF = true
 
-        let document = documentStore.document
+        let document = outputDocument()
         let subscriptionStatus = documentStore.subscriptionStatus
         let preflightService = preflightService
 
@@ -248,7 +248,7 @@ private struct WorkspaceView: View {
         documentStore.updateSettings(fixedDocument.settings)
 
         let result = preflightService.check(
-            document: fixedDocument,
+            document: outputDocument(from: fixedDocument),
             subscriptionStatus: documentStore.subscriptionStatus
         )
 
@@ -266,7 +266,7 @@ private struct WorkspaceView: View {
             isExportingPDF = true
         }
 
-        let exportDocument = document ?? documentStore.document
+        let exportDocument = outputDocument(from: document ?? documentStore.document)
         let subscriptionStatus = documentStore.subscriptionStatus
 
         Task {
@@ -287,6 +287,11 @@ private struct WorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func outputDocument(from document: ManuscriptDocument? = nil) -> ManuscriptDocument {
+        (document ?? documentStore.document)
+            .applyingPublisherInfo(from: documentStore.userDefaultSettings)
     }
 }
 

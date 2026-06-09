@@ -34,9 +34,17 @@ struct VerticalTypesettingRegressionCheck {
         let tateChuYokoCells = VerticalTextTypesetter
             .cells(from: "12と123とTypeScript Next.js", alphanumericOrientation: .tateChuYoko)
             .flatMap { $0 }
-        expect(tateChuYokoCells.contains("12"), "two ASCII digits should use tate-chu-yoko")
+        expect(tateChuYokoCells.contains("12"), "two ASCII digits should stay in one half-width run")
         expect(tateChuYokoCells.contains("123"), "three ASCII digits should stay in one run")
         expect(tateChuYokoCells.contains("TypeScript Next.js"), "English words should stay in one run")
+        expect(
+            VerticalTextTypesetter.glyph(for: "12", alphanumericOrientation: .tateChuYoko).rotationDegrees == 90,
+            "half-width digits should be sideways even when old settings request tate-chu-yoko"
+        )
+        expect(
+            VerticalTextTypesetter.cells(from: "ＡＢＣ１２３", alphanumericOrientation: .sideways).flatMap { $0 } == ["Ａ", "Ｂ", "Ｃ", "１", "２", "３"],
+            "full-width alphanumeric characters should remain upright vertical characters"
+        )
 
         let ellipsisCells = VerticalTextTypesetter.cells(from: "……。", alphanumericOrientation: .sideways)
         expect(ellipsisCells.count == 3, "double ellipsis should reserve two cells before punctuation")
@@ -45,13 +53,13 @@ struct VerticalTypesettingRegressionCheck {
         expect(VerticalTextTypesetter.formsNonBreakingPair("……", "。"), "ellipsis and punctuation should not split")
 
         let commaGlyph = VerticalTextTypesetter.glyph(for: "、", alphanumericOrientation: .sideways)
-        expect(commaGlyph.xOffset <= 0, "punctuation should be moved left inside the cell")
-        expect(commaGlyph.yOffset >= 0.12, "punctuation should be lowered to match the reference")
+        expect(commaGlyph.xOffset > 0, "punctuation should sit toward the upper-right of the cell")
+        expect(commaGlyph.yOffset < 0, "punctuation should sit toward the upper-right of the cell")
 
         let smallKanaGlyph = VerticalTextTypesetter.glyph(for: "ュ", alphanumericOrientation: .sideways)
         expect((0.70...0.80).contains(smallKanaGlyph.fontScale), "small kana should stay around 70-80 percent of body size")
-        expect(smallKanaGlyph.xOffset <= 0, "small kana should not drift to the right")
-        expect(smallKanaGlyph.yOffset >= 0.10, "small kana should be lowered to match the reference")
+        expect(smallKanaGlyph.xOffset > 0, "small kana should sit slightly to the right")
+        expect(smallKanaGlyph.yOffset < 0, "small kana should sit higher in the cell")
 
         let bracketGlyph = VerticalTextTypesetter.glyph(for: "【", alphanumericOrientation: .sideways)
         expect(bracketGlyph.text == "︻", "lenticular brackets should use vertical glyph forms")

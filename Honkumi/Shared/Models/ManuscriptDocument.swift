@@ -29,6 +29,14 @@ nonisolated struct ManuscriptDocument: Codable, Equatable, Identifiable {
 }
 
 nonisolated extension ManuscriptDocument {
+    func applyingPublisherInfo(from defaultSettings: EditorSettings) -> ManuscriptDocument {
+        var document = self
+        var settings = document.settings
+        settings.colophon = settings.colophon.applyingPublisherInfo(from: defaultSettings.colophon)
+        document.settings = settings
+        return document
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case categoryId

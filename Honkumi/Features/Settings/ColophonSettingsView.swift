@@ -42,8 +42,6 @@ struct ColophonSettingsView: View {
             Toggle("奥付を追加", isOn: colophonBinding(\.isEnabled))
 
             if viewModel.settings.colophon.isEnabled {
-                colophonIdentityFields
-
                 Toggle("発行日を表示", isOn: colophonBinding(\.showsPublicationDate))
                 PublicationDateField(date: publicationDateOptionalBinding)
                     .disabled(!viewModel.settings.colophon.showsPublicationDate)

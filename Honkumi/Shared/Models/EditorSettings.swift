@@ -57,7 +57,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
         showChapterTitle: Bool,
         chapterTitleStyle: ChapterTitleStyle,
         startsChapterOnNewPage: Bool,
-        alphanumericOrientation: AlphanumericOrientation = .stacked,
+        alphanumericOrientation: AlphanumericOrientation = .sideways,
         colophon: ColophonSettings = .default,
         formatSettings: FormatSettings = .default
     ) {
@@ -105,7 +105,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
         showChapterTitle: false,
         chapterTitleStyle: .plain,
         startsChapterOnNewPage: false,
-        alphanumericOrientation: .stacked,
+        alphanumericOrientation: .sideways,
         colophon: .default,
         formatSettings: .default
     )
@@ -131,7 +131,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
             showChapterTitle: showChapterTitle,
             chapterTitleStyle: chapterTitleStyle,
             startsChapterOnNewPage: startsChapterOnNewPage,
-            alphanumericOrientation: alphanumericOrientation,
+            alphanumericOrientation: .sideways,
             colophon: colophon.validated,
             formatSettings: formatSettings.validated
         )
@@ -403,6 +403,28 @@ nonisolated struct ColophonSettings: Codable, Equatable {
             contact: contact.trimmedForStorage,
             notes: notes.trimmedForStorage
         )
+    }
+
+    func applyingPublisherInfo(from publisherInfo: ColophonSettings) -> ColophonSettings {
+        let publisherInfo = publisherInfo.validated
+        var merged = self
+        merged.publisherName = publisherInfo.publisherName
+        merged.authorName = publisherInfo.authorName
+        merged.circleName = publisherInfo.circleName
+        merged.authorImageData = publisherInfo.authorImageData
+        merged.circleImageData = publisherInfo.circleImageData
+        merged.usesCircleImageForCreator = publisherInfo.usesCircleImageForCreator
+        merged.showsPublisherName = publisherInfo.showsPublisherName
+        merged.showsAuthorName = publisherInfo.showsAuthorName
+        merged.showsCircleName = publisherInfo.showsCircleName
+        merged.showsWebsiteURL = publisherInfo.showsWebsiteURL
+        merged.showsQRCode = publisherInfo.showsQRCode
+        merged.websiteURL = publisherInfo.websiteURL
+        merged.xURL = publisherInfo.xURL
+        merged.pixivURL = publisherInfo.pixivURL
+        merged.contact = publisherInfo.contact
+        merged.notes = publisherInfo.notes
+        return merged.validated
     }
 
     var formattedPublicationDate: String {
