@@ -67,6 +67,72 @@ final class SettingsViewModel: ObservableObject {
         scope == .activeWork
     }
 
+    var printSettingsForDisplay: EditorSettings {
+        RecommendedPrintSettings.effectiveSettings(
+            body: printRecommendationBody,
+            settings: settings
+        )
+    }
+
+    var estimatedPrintPageCount: Int {
+        RecommendedPrintSettings.estimatedPageCount(
+            body: printRecommendationBody,
+            settings: printSettingsForDisplay
+        )
+    }
+
+    private var printRecommendationBody: String {
+        switch scope {
+        case .activeWork:
+            document.body
+        case .userDefault:
+            document.body
+        }
+    }
+
+    func updateUseRecommendedPrintSettings(_ value: Bool) {
+        var updated = settings
+        if updated.useRecommendedPrintSettings,
+           !value,
+           Self.hasDefaultManualPrintFields(updated) {
+            updated = Self.copyManualPrintFields(from: printSettingsForDisplay, to: updated)
+        }
+        updated.useRecommendedPrintSettings = value
+        settings = updated
+    }
+
+    private static func hasDefaultManualPrintFields(_ settings: EditorSettings) -> Bool {
+        let defaults = EditorSettings.default
+        return settings.selectedFontId == defaults.selectedFontId
+            && settings.fontSize == defaults.fontSize
+            && settings.lineSpacing == defaults.lineSpacing
+            && settings.characterSpacing == defaults.characterSpacing
+            && settings.charactersPerLine == defaults.charactersPerLine
+            && settings.linesPerPage == defaults.linesPerPage
+            && settings.marginTop == defaults.marginTop
+            && settings.marginBottom == defaults.marginBottom
+            && settings.marginInner == defaults.marginInner
+            && settings.marginOuter == defaults.marginOuter
+    }
+
+    private static func copyManualPrintFields(
+        from recommended: EditorSettings,
+        to settings: EditorSettings
+    ) -> EditorSettings {
+        var updated = settings
+        updated.selectedFontId = recommended.selectedFontId
+        updated.fontSize = recommended.fontSize
+        updated.lineSpacing = recommended.lineSpacing
+        updated.characterSpacing = recommended.characterSpacing
+        updated.charactersPerLine = recommended.charactersPerLine
+        updated.linesPerPage = recommended.linesPerPage
+        updated.marginTop = recommended.marginTop
+        updated.marginBottom = recommended.marginBottom
+        updated.marginInner = recommended.marginInner
+        updated.marginOuter = recommended.marginOuter
+        return updated
+    }
+
     func updatePageSize(_ value: PageSize) {
         var updated = settings
         updated.pageSize = value
@@ -82,6 +148,18 @@ final class SettingsViewModel: ObservableObject {
     func updateFontSize(_ value: CGFloat) {
         var updated = settings
         updated.fontSize = value
+        settings = updated
+    }
+
+    func updateEditorFontId(_ value: String) {
+        var updated = settings
+        updated.editorFontId = value
+        settings = updated
+    }
+
+    func updateEditorFontSize(_ value: CGFloat) {
+        var updated = settings
+        updated.editorFontSize = value
         settings = updated
     }
 
@@ -151,6 +229,12 @@ final class SettingsViewModel: ObservableObject {
         settings = updated
     }
 
+    func updateShowsCropMarks(_ value: Bool) {
+        var updated = settings
+        updated.showsCropMarks = value
+        settings = updated
+    }
+
     func updateShowTableOfContents(_ value: Bool) {
         var updated = settings
         updated.showTableOfContents = value
@@ -175,7 +259,7 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func updatePageNumberFontId(_ value: String?) {
-        guard isPageNumberFontUnlocked else { return }
+        guard isPageNumberFontUnlocked || value == nil else { return }
         var updated = settings
         updated.pageNumberFontId = value
         settings = updated
@@ -185,6 +269,12 @@ final class SettingsViewModel: ObservableObject {
         guard isPageNumberFontUnlocked else { return }
         var updated = settings
         updated.pageNumberSize = value
+        settings = updated
+    }
+
+    func updatePageNumberStart(_ value: Int) {
+        var updated = settings
+        updated.pageNumberStart = value
         settings = updated
     }
 

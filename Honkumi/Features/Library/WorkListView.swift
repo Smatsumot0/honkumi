@@ -180,7 +180,7 @@ struct WorkListView: View {
             documentStore.selectWork(id: work.id)
             onSelectWork()
         } label: {
-            WorkRow(work: work, isActive: work.id == documentStore.document.id)
+            WorkRow(work: work)
         }
         .draggable(work.id.uuidString)
         .contextMenu {
@@ -226,7 +226,6 @@ struct WorkListView: View {
 
 private struct WorkRow: View {
     let work: ManuscriptDocument
-    let isActive: Bool
 
     var body: some View {
         HStack {
@@ -241,11 +240,6 @@ private struct WorkRow: View {
             }
 
             Spacer()
-
-            if isActive {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Color.accentColor)
-            }
         }
     }
 

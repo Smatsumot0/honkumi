@@ -15,18 +15,25 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
+                            <imageView userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackground" translatesAutoresizingMaskIntoConstraints="NO" id="launchBackgroundImage">
+                                <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                            </imageView>
                             <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" image="LaunchTitle" translatesAutoresizingMaskIntoConstraints="NO" id="launchTitleImage">
-                                <rect key="frame" x="86.5" y="380.33333333333331" width="220" height="91.666666666666686"/>
+                                <rect key="frame" x="141.5" y="403.08333333333331" width="110" height="45.833333333333343"/>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="launchSafeArea"/>
                         <color key="backgroundColor" red="0.062745098039215685" green="0.16078431372549021" blue="0.29019607843137257" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
+                            <constraint firstItem="launchBackgroundImage" firstAttribute="leading" secondItem="launchRootView" secondAttribute="leading" id="launchBackgroundLeading"/>
+                            <constraint firstItem="launchBackgroundImage" firstAttribute="trailing" secondItem="launchRootView" secondAttribute="trailing" id="launchBackgroundTrailing"/>
+                            <constraint firstItem="launchBackgroundImage" firstAttribute="top" secondItem="launchRootView" secondAttribute="top" id="launchBackgroundTop"/>
+                            <constraint firstItem="launchBackgroundImage" firstAttribute="bottom" secondItem="launchRootView" secondAttribute="bottom" id="launchBackgroundBottom"/>
                             <constraint firstItem="launchTitleImage" firstAttribute="centerX" secondItem="launchRootView" secondAttribute="centerX" id="launchTitleCenterX"/>
                             <constraint firstItem="launchTitleImage" firstAttribute="centerY" secondItem="launchRootView" secondAttribute="centerY" id="launchTitleCenterY"/>
-                            <constraint firstItem="launchTitleImage" firstAttribute="width" secondItem="launchRootView" secondAttribute="width" multiplier="0.4" priority="750" id="launchTitleWidthRatio"/>
-                            <constraint firstItem="launchTitleImage" firstAttribute="width" relation="greaterThanOrEqual" constant="220" id="launchTitleMinWidth"/>
-                            <constraint firstItem="launchTitleImage" firstAttribute="width" relation="lessThanOrEqual" constant="320" id="launchTitleMaxWidth"/>
+                            <constraint firstItem="launchTitleImage" firstAttribute="width" secondItem="launchRootView" secondAttribute="width" multiplier="0.2" priority="750" id="launchTitleWidthRatio"/>
+                            <constraint firstItem="launchTitleImage" firstAttribute="width" relation="greaterThanOrEqual" constant="110" id="launchTitleMinWidth"/>
+                            <constraint firstItem="launchTitleImage" firstAttribute="width" relation="lessThanOrEqual" constant="160" id="launchTitleMaxWidth"/>
                             <constraint firstItem="launchTitleImage" firstAttribute="height" secondItem="launchTitleImage" secondAttribute="width" multiplier="0.4166666667" id="launchTitleAspectRatio"/>
                         </constraints>
                     </view>
@@ -37,6 +44,7 @@
         </scene>
     </scenes>
     <resources>
+        <image name="LaunchBackground" width="1024" height="1024"/>
         <image name="LaunchTitle" width="2400" height="1000"/>
     </resources>
 </document>

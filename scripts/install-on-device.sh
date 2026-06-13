@@ -6,8 +6,14 @@ PROJECT_PATH="$ROOT_DIR/Honkumi.xcodeproj"
 SCHEME="Honkumi"
 CONFIGURATION="Debug"
 DERIVED_DATA_PATH="$ROOT_DIR/.build/DeviceDerivedData"
+ALLOW_PROVISIONING_UPDATES="${ALLOW_PROVISIONING_UPDATES:-1}"
 
 DEVICE_ID="${DEVICE_ID:-}"
+PROVISIONING_ARGS=()
+
+if [[ "$ALLOW_PROVISIONING_UPDATES" != "0" ]]; then
+  PROVISIONING_ARGS=(-allowProvisioningUpdates)
+fi
 
 if [[ -z "$DEVICE_ID" ]]; then
   DEVICE_ID="$(xcrun devicectl list devices \
@@ -25,6 +31,7 @@ xcodebuild \
   -configuration "$CONFIGURATION" \
   -destination "platform=iOS,id=$DEVICE_ID" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  "${PROVISIONING_ARGS[@]}" \
   build
 
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION-iphoneos/$SCHEME.app"

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import UIKit
 
 nonisolated enum PreflightSeverity: String, CaseIterable, Identifiable {
     case error
@@ -26,6 +27,7 @@ nonisolated enum PreflightIssueLocationType: String {
     case page
     case colophon
     case toc
+    case pdf
 }
 
 nonisolated struct PreflightIssueLocation: Equatable {
@@ -80,20 +82,24 @@ nonisolated struct PreflightResult: Identifiable, Equatable {
 
 nonisolated struct PDFPreflightService {
     func check(document: ManuscriptDocument, subscriptionStatus: SubscriptionStatus) -> PreflightResult {
-        let settings = document.settings
-        let validatedSettings = settings.validated
         var checkedDocument = document
-        checkedDocument.settings = validatedSettings
+        checkedDocument.settings = document.settings.validated
         let paginationResult = ManuscriptRenderPipeline.paginationResult(
             for: checkedDocument,
             subscriptionStatus: subscriptionStatus
         )
         let effectiveDocument = paginationResult.document
-        let parsed = ManuscriptMarkupParser.parse(document.body)
+        let effectiveSettings = effectiveDocument.settings.validated
+        let parsed = ManuscriptMarkupParser.parse(effectiveDocument.body)
         let pages = paginationResult.pages
+        let textNormalizationReport = ManuscriptRenderPipeline.printTextNormalizationReport(
+            for: checkedDocument,
+            subscriptionStatus: subscriptionStatus
+        )
         var issues: [PreflightIssue] = []
 
-        checkBody(document.body, parsed: parsed, settings: validatedSettings, into: &issues)
+        checkBody(effectiveDocument.body, parsed: parsed, settings: effectiveSettings, into: &issues)
+        checkPrintTextNormalization(textNormalizationReport, into: &issues)
         checkPageStructure(
             document: effectiveDocument,
             parsed: parsed,
@@ -101,18 +107,25 @@ nonisolated struct PDFPreflightService {
             subscriptionStatus: subscriptionStatus,
             into: &issues
         )
-        checkPrintSettings(settings, into: &issues)
-        checkPDFDisplay(settings: validatedSettings, pages: pages, into: &issues)
+        checkPrintSettings(effectiveSettings, into: &issues)
+        checkPDFDisplay(settings: effectiveSettings, pages: pages, into: &issues)
         checkSubmissionReadiness(
-            settings: validatedSettings,
+            settings: effectiveSettings,
             pages: pages,
             subscriptionStatus: subscriptionStatus,
+            into: &issues
+        )
+        checkPrintProduction(
+            settings: effectiveSettings,
+            pages: pages,
+            subscriptionStatus: subscriptionStatus,
+            textNormalizationReport: textNormalizationReport,
             into: &issues
         )
         appendInfo(
             document: effectiveDocument,
             pages: pages,
-            settings: validatedSettings,
+            settings: effectiveSettings,
             into: &issues
         )
 
@@ -425,6 +438,293 @@ nonisolated struct PDFPreflightService {
 
     }
 
+    private func checkPrintProduction(
+        settings: EditorSettings,
+        pages: [PreviewPage],
+        subscriptionStatus: SubscriptionStatus,
+        textNormalizationReport: PrintTextNormalizationReport,
+        into issues: inout [PreflightIssue]
+    ) {
+        let firstLayout = LayoutCalculator.layout(for: settings, pageNumber: 1)
+        let geometry = PDFPrintProduction.pageGeometry(for: firstLayout)
+        let profile = PDFPrintProduction.pdfX4Profile
+
+        issues.append(info(
+            id: "print.cropMarks",
+            title: "トンボ",
+            message: settings.showsCropMarks
+                ? "ON。仕上がりサイズの外側にコーナートンボを追加します。"
+                : "OFF。仕上がりサイズどおりのPDFを出力します。",
+            location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "showsCropMarks")
+        ))
+
+        issues.append(info(
+            id: "print.pdfx4",
+            title: "PDF/X-4検証状態",
+            message: "PDF/X-4向け設定・未検証。CoreGraphics出力後にPDF-\(PDFPrintProduction.targetPDFVersion)ヘッダーへ補正し、Output Intent / ICC / PDFボックスを付与しますが、veraPDF未実行のため準拠済みとは表示しません。",
+            location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+
+        issues.append(info(
+            id: "print.pdfVersion",
+            title: "PDF version",
+            message: "出力後にPDFヘッダーをPDF-\(PDFPrintProduction.targetPDFVersion)へ補正します。低レベル構造のPDF/X-4適合性は未検証です。",
+            location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+
+        if profile.outputIntent != nil, profile.hasEmbeddableICCProfile {
+            issues.append(info(
+                id: "print.outputIntent",
+                title: "ICC / Output Intent",
+                message: "\(profile.outputConditionIdentifier) のOutput IntentとICCプロファイルをPDFへ埋め込みます。",
+                location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+            ))
+        } else {
+            issues.append(warning(
+                id: "print.outputIntent.missing",
+                title: "ICC / Output Intentを埋め込めません",
+                message: "CoreGraphicsから埋め込み可能なICCプロファイルを取得できませんでした。",
+                location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+            ))
+        }
+
+        checkFontEmbedding(settings: settings, subscriptionStatus: subscriptionStatus, into: &issues)
+        checkEmojiFontRisk(textNormalizationReport, into: &issues)
+        checkImageQuality(settings: settings, pages: pages, subscriptionStatus: subscriptionStatus, into: &issues)
+
+        issues.append(info(
+            id: "print.fullPageRaster",
+            title: "PDF全体の画像化",
+            message: "なし。本文、罫線、トンボ、ノンブル、QRコードはテキストまたはベクターとして描画します。",
+            location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+
+        issues.append(info(
+            id: "print.encryption",
+            title: "暗号化",
+            message: "なし。PDF生成時にユーザー/オーナーパスワードを設定しません。",
+            location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+
+        issues.append(info(
+            id: "print.interactiveElements",
+            title: "JavaScript / フォーム / 注釈",
+            message: "なし。PDF生成処理ではJavaScript、フォーム、動画、音声、注釈を追加しません。",
+            location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+
+        issues.append(info(
+            id: "print.pdfBoxes",
+            title: "PDFボックス",
+            message: pdfBoxSummary(geometry),
+            location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+
+        issues.append(warning(
+            id: "print.pdfx4.unsupported",
+            title: "PDF/X-4未対応 / 未検証項目",
+            message: PDFX4ProductionProfile.unsupportedCapabilities.joined(separator: " / "),
+            location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+    }
+
+    private func checkPrintTextNormalization(
+        _ report: PrintTextNormalizationReport,
+        into issues: inout [PreflightIssue]
+    ) {
+        if report.totalReplacementCount == 0 {
+            issues.append(info(
+                id: "print.textNormalization.none",
+                title: "絵文字置換件数",
+                message: "0件。印刷用の絵文字置換は不要です。",
+                location: .init(type: .text, pageNumber: nil, characterRange: nil, settingKey: nil)
+            ))
+            return
+        }
+
+        issues.append(warning(
+            id: "print.textNormalization.summary",
+            title: "絵文字置換件数",
+            message: "合計\(report.totalReplacementCount)件を印刷用に置換します。\(report.sampleLocations)",
+            location: firstReplacementLocation(in: report)
+        ))
+
+        issues.append(info(
+            id: "print.textNormalization.hearts",
+            title: "ハート置換件数",
+            message: "\(report.heartReplacementCount)件。ハート系文字はすべて\(PrintTextNormalizer.printableHeart)へ置換します。",
+            location: .init(type: .text, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+
+        issues.append(info(
+            id: "print.textNormalization.unsupported",
+            title: "未対応文字の置換件数",
+            message: "\(report.unsupportedEmojiReplacementCount)件。ハート以外のカラー絵文字や環境依存絵文字は\(PrintTextNormalizer.unsupportedEmojiReplacement)へ置換します。",
+            location: .init(type: .text, pageNumber: nil, characterRange: nil, settingKey: nil)
+        ))
+    }
+
+    private func checkEmojiFontRisk(
+        _ report: PrintTextNormalizationReport,
+        into issues: inout [PreflightIssue]
+    ) {
+        if report.containsEmojiFontRisk {
+            issues.append(warning(
+                id: "print.emojiFontRisk",
+                title: "AppleColorEmojiなど絵文字フォント",
+                message: "入力内の絵文字系文字はPDF/プレビュー用に置換します。置換後PDFにAppleColorEmojiが残っていないかは出力後検査してください。",
+                location: firstReplacementLocation(in: report)
+            ))
+        } else {
+            issues.append(info(
+                id: "print.emojiFontRisk.none",
+                title: "AppleColorEmojiなど絵文字フォント",
+                message: "入力内に絵文字フォントへフォールバックしそうな文字は検出していません。",
+                location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+            ))
+        }
+    }
+
+    private func firstReplacementLocation(in report: PrintTextNormalizationReport) -> PreflightIssueLocation? {
+        guard let first = report.replacements.first else { return nil }
+        switch first.location {
+        case .title:
+            return .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "title")
+        case let .body(offset):
+            return .init(type: .text, pageNumber: nil, characterRange: offset..<(offset + 1), settingKey: nil)
+        case let .colophon(field):
+            return .init(type: .colophon, pageNumber: nil, characterRange: nil, settingKey: field)
+        }
+    }
+
+    private func checkFontEmbedding(
+        settings: EditorSettings,
+        subscriptionStatus: SubscriptionStatus,
+        into issues: inout [PreflightIssue]
+    ) {
+        let bodyFont = AppFontCatalog.effectiveFont(
+            selectedFontId: settings.selectedFontId,
+            isAdditionalFontPackUnlocked: subscriptionStatus == .paid
+        )
+        if let postScriptName = bodyFont.postScriptName,
+           bodyFont.fileName != nil,
+           UIFont(name: postScriptName, size: 10) != nil {
+            issues.append(info(
+                id: "print.fontEmbedding.body",
+                title: "フォント埋め込みチェック",
+                message: "本文フォント「\(bodyFont.displayName)」は同梱フォントをPDFへ埋め込み対象として描画します。",
+                location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: "selectedFontId")
+            ))
+        } else {
+            issues.append(warning(
+                id: "print.fontEmbedding.bodyFallback",
+                title: "本文フォントの埋め込み確認が必要です",
+                message: "本文フォントが同梱フォントとして読み込めないため、システムフォントへフォールバックする可能性があります。",
+                location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "selectedFontId")
+            ))
+        }
+
+        guard settings.isPageNumberEnabled else { return }
+
+        if subscriptionStatus == .paid,
+           let pageNumberFont = AppFontCatalog.pageNumberFont(id: settings.pageNumberFontId) {
+            if UIFont(name: pageNumberFont.postScriptName, size: 10) != nil {
+                issues.append(info(
+                    id: "print.fontEmbedding.pageNumber",
+                    title: "ノンブルフォント埋め込みチェック",
+                    message: "ノンブルフォント「\(pageNumberFont.displayName)」は同梱フォントをPDFへ埋め込み対象として描画します。",
+                    location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: "pageNumberFontId")
+                ))
+            } else {
+                issues.append(warning(
+                    id: "print.fontEmbedding.pageNumberFallback",
+                    title: "ノンブルフォントの埋め込み確認が必要です",
+                    message: "選択中のノンブルフォントを読み込めないため、本文フォントへフォールバックする可能性があります。",
+                    location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "pageNumberFontId")
+                ))
+            }
+        } else {
+            issues.append(info(
+                id: "print.fontEmbedding.pageNumber.body",
+                title: "ノンブルフォント埋め込みチェック",
+                message: "ノンブルは本文フォントと同じ同梱フォントで描画します。",
+                location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: "pageNumberFontId")
+            ))
+        }
+    }
+
+    private func checkImageQuality(
+        settings: EditorSettings,
+        pages: [PreviewPage],
+        subscriptionStatus: SubscriptionStatus,
+        into issues: inout [PreflightIssue]
+    ) {
+        if settings.colophon.isEnabled,
+           settings.colophon.showsQRCode,
+           !settings.colophon.websiteURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(info(
+                id: "print.qrResolution",
+                title: "QRコード解像度",
+                message: "奥付QRコードはPDF上でベクター矩形として描画するため、低解像度画像は使用しません。",
+                location: .init(type: .colophon, pageNumber: pages.count, characterRange: nil, settingKey: "websiteURL")
+            ))
+        } else {
+            issues.append(info(
+                id: "print.qrResolution.notUsed",
+                title: "QRコード解像度",
+                message: "奥付QRコードは出力しません。",
+                location: .init(type: .colophon, pageNumber: nil, characterRange: nil, settingKey: "showsQRCode")
+            ))
+        }
+
+        guard subscriptionStatus == .paid,
+              settings.colophon.hasCreatorImage,
+              let imageData = settings.colophon.circleImageData,
+              let image = UIImage(data: imageData),
+              let cgImage = image.cgImage else {
+            issues.append(info(
+                id: "print.imageResolution.none",
+                title: "画像解像度",
+                message: "本文内の挿絵画像は未使用です。PDF出力時に全体を低解像度画像へ変換しません。",
+                location: .init(type: .pdf, pageNumber: nil, characterRange: nil, settingKey: nil)
+            ))
+            return
+        }
+
+        let layout = LayoutCalculator.layout(for: settings, pageNumber: max(pages.count, 1))
+        let displayHeight = max(layout.fontSize * 2.4, 18)
+        let aspectRatio = CGFloat(cgImage.width) / max(CGFloat(cgImage.height), 1)
+        let displayWidth = min(displayHeight * aspectRatio, layout.bodyFrame.width * 0.36)
+        let ppiX = CGFloat(cgImage.width) / max(displayWidth / LayoutCalculator.pointsPerInch, 0.01)
+        let ppiY = CGFloat(cgImage.height) / max(displayHeight / LayoutCalculator.pointsPerInch, 0.01)
+        let effectivePPI = min(ppiX, ppiY)
+
+        if effectivePPI < 300 {
+            issues.append(warning(
+                id: "print.imageResolution.lowCreator",
+                title: "画像解像度が低い可能性があります",
+                message: "奥付のサークル画像は実寸配置で約\(formatted(effectivePPI))ppiです。300ppi以上を目安にしてください。",
+                location: .init(type: .colophon, pageNumber: pages.count, characterRange: nil, settingKey: "circleImageData")
+            ))
+        } else {
+            issues.append(info(
+                id: "print.imageResolution.creator",
+                title: "画像解像度",
+                message: "奥付のサークル画像は実寸配置で約\(formatted(effectivePPI))ppiです。",
+                location: .init(type: .colophon, pageNumber: pages.count, characterRange: nil, settingKey: "circleImageData")
+            ))
+        }
+    }
+
+    private func pdfBoxSummary(_ geometry: PDFPageGeometry) -> String {
+        [
+            "MediaBox \(formattedMillimeters(geometry.mediaBox.size))",
+            "TrimBox \(formattedMillimeters(geometry.trimBox.size))",
+            "CropBox \(formattedMillimeters(geometry.cropBox.size))",
+            "BleedBox \(formattedMillimeters(geometry.bleedBox.size))"
+        ].joined(separator: " / ")
+    }
+
     private func appendInfo(
         document: ManuscriptDocument,
         pages: [PreviewPage],
@@ -448,6 +748,12 @@ nonisolated struct PDFPreflightService {
             title: "用紙サイズ",
             message: settings.pageSize.displayName,
             location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "pageSize")
+        ))
+        issues.append(info(
+            id: "info.recommendedPrintSettings",
+            title: "推奨設定",
+            message: settings.useRecommendedPrintSettings ? "ON。推奨設定を適用しています。" : "OFF。手動設定を適用しています。",
+            location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "useRecommendedPrintSettings")
         ))
         issues.append(info(
             id: "info.bodyFont",
@@ -668,5 +974,11 @@ nonisolated struct PDFPreflightService {
             return String(format: "%.0f", value)
         }
         return String(format: "%.1f", value)
+    }
+
+    private func formattedMillimeters(_ size: CGSize) -> String {
+        let width = size.width * LayoutCalculator.millimetersPerInch / LayoutCalculator.pointsPerInch
+        let height = size.height * LayoutCalculator.millimetersPerInch / LayoutCalculator.pointsPerInch
+        return "\(formatted(width))×\(formatted(height))mm"
     }
 }

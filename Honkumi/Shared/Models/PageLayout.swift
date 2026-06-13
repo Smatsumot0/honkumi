@@ -105,5 +105,5 @@ nonisolated struct PageLayout: Equatable {
     private static let footerItemGap = LayoutCalculator.millimetersToPoints(1.6)
     private static let minimumPageEdgeInset = LayoutCalculator.millimetersToPoints(3)
     private static let pageNumberBottomInset = LayoutCalculator.millimetersToPoints(4)
-    private static let poweredByBottomInset = LayoutCalculator.millimetersToPoints(2)
+    private static let poweredByBottomInset = LayoutCalculator.millimetersToPoints(4)
 }

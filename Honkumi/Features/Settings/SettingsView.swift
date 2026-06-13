@@ -1,11 +1,28 @@
 import SwiftUI
 
+enum SettingsInitialTab {
+    case editor
+    case print
+}
+
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
-    @State private var selectedTab: SettingsTab = .print
-    @State private var showsPageNumberDesignGuide = false
+    @ObservedObject var proStore: HonkumiProStore
+    @State private var selectedTab: SettingsTab
+    @State private var isProPurchasePresented = false
+    @State private var presentedProFeature: HonkumiProFeature?
     private let settingTitleWidth: CGFloat = 112
     private let settingValueWidth: CGFloat = 72
+
+    init(
+        viewModel: SettingsViewModel,
+        proStore: HonkumiProStore,
+        initialTab: SettingsInitialTab = .editor
+    ) {
+        _viewModel = StateObject(wrappedValue: viewModel)
+        self.proStore = proStore
+        _selectedTab = State(initialValue: initialTab == .print ? .print : .editor)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,19 +32,37 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .padding()
+            .controlSize(.small)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .background(.bar)
 
             switch selectedTab {
-            case .print:
-                printSettingsForm
+            case .editor:
+                editorSettingsForm
             case .format:
                 formatSettingsForm
+            case .print:
+                printSettingsForm
             }
+        }
+        .sheet(isPresented: $isProPurchasePresented) {
+            HonkumiProPurchaseView(proStore: proStore, feature: presentedProFeature)
+        }
+        .alert(item: purchaseMessageBinding) { message in
+            Alert(
+                title: Text(message.title),
+                message: Text(message.body),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
 
+    @ViewBuilder
     private var printSettingsForm: some View {
+        let printSettings = viewModel.printSettingsForDisplay
+        let usesRecommendedPrintSettings = viewModel.settings.useRecommendedPrintSettings
+
         Form {
             Section("用紙") {
                 Picker("サイズ", selection: Binding(
@@ -40,6 +75,47 @@ struct SettingsView: View {
                 }
             }
 
+            Section("推奨設定") {
+                Toggle(isOn: Binding(
+                    get: { viewModel.settings.useRecommendedPrintSettings },
+                    set: { viewModel.updateUseRecommendedPrintSettings($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("推奨設定を使用")
+                        Text(usesRecommendedPrintSettings
+                            ? "用紙サイズとページ数に合わせて、印刷向けの安全な余白・組版設定を自動適用します。"
+                            : "推奨設定をオフにすると、余白・文字サイズ・行数・文字数などを手動で調整できます。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                if usesRecommendedPrintSettings {
+                    LabeledContent("想定ページ数", value: "\(viewModel.estimatedPrintPageCount)ページ")
+                    LabeledContent("本文フォント", value: currentFontDisplayName)
+                }
+            }
+
+            Section("PDF出力") {
+                Toggle(isOn: Binding(
+                    get: { viewModel.settings.showsCropMarks },
+                    set: { viewModel.updateShowsCropMarks($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("トンボ")
+                        Text("印刷所から指定がある場合、仕上がり位置を示すトンボをPDFに追加します。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                Text("印刷所指定がある場合のみONにしてください")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("組版") {
                 NavigationLink {
                     fontSettingsView
@@ -49,74 +125,101 @@ struct SettingsView: View {
                         Spacer()
                         Text(currentFontDisplayName)
                             .font(AppFontCatalog.swiftUIFont(
-                                selectedFontId: viewModel.settings.selectedFontId,
+                                selectedFontId: printSettings.selectedFontId,
                                 size: 17,
                                 isAdditionalFontPackUnlocked: true
                             ))
                             .foregroundStyle(.secondary)
                     }
                 }
+                .disabled(usesRecommendedPrintSettings)
 
                 valueStepper(
                     title: "文字サイズ",
-                    value: viewModel.settings.fontSize,
+                    value: printSettings.fontSize,
                     range: EditorSettings.fontSizeRange,
                     step: 0.5,
                     format: "%.1f pt",
                     update: viewModel.updateFontSize
                 )
+                .disabled(usesRecommendedPrintSettings)
 
                 intStepper(
                     title: "1行あたり",
-                    value: viewModel.settings.charactersPerLine,
+                    value: printSettings.charactersPerLine,
                     unit: "文字",
                     range: EditorSettings.charactersPerLineRange,
                     update: viewModel.updateCharactersPerLine
                 )
+                .disabled(usesRecommendedPrintSettings)
 
                 intStepper(
                     title: "1ページあたり",
-                    value: viewModel.settings.linesPerPage,
+                    value: printSettings.linesPerPage,
                     unit: "行",
                     range: EditorSettings.linesPerPageRange,
                     update: viewModel.updateLinesPerPage
                 )
+                .disabled(usesRecommendedPrintSettings)
 
+                valueStepper(
+                    title: "字間",
+                    value: printSettings.characterSpacing,
+                    range: EditorSettings.characterSpacingRange,
+                    step: 0.1,
+                    format: "%.1f pt",
+                    update: viewModel.updateCharacterSpacing
+                )
+                .disabled(usesRecommendedPrintSettings)
+
+                valueStepper(
+                    title: "行間",
+                    value: printSettings.lineSpacing,
+                    range: EditorSettings.lineSpacingRange,
+                    step: 0.5,
+                    format: "%.1f pt",
+                    update: viewModel.updateLineSpacing
+                )
+                .disabled(usesRecommendedPrintSettings)
             }
 
             Section("余白") {
                 valueStepper(
                     title: "天",
-                    value: viewModel.settings.marginTop,
+                    value: printSettings.marginTop,
                     range: EditorSettings.marginTopRange,
                     step: 1,
                     format: "%.0f mm",
                     update: viewModel.updateMarginTop
                 )
+                .disabled(usesRecommendedPrintSettings)
                 valueStepper(
                     title: "地",
-                    value: viewModel.settings.marginBottom,
+                    value: printSettings.marginBottom,
                     range: EditorSettings.marginBottomRange,
                     step: 1,
                     format: "%.0f mm",
                     update: viewModel.updateMarginBottom
                 )
+                .disabled(usesRecommendedPrintSettings)
                 valueStepper(
                     title: "ノド",
-                    value: viewModel.settings.marginInner,
+                    value: printSettings.marginInner,
                     range: EditorSettings.marginInnerRange,
                     step: 1,
                     format: "%.0f mm",
                     update: viewModel.updateMarginInner
                 )
+                .disabled(usesRecommendedPrintSettings)
                 valueStepper(
                     title: "小口",
-                    value: viewModel.settings.marginOuter,
+                    value: printSettings.marginOuter,
                     range: EditorSettings.marginOuterRange,
                     step: 1,
                     format: "%.0f mm",
                     update: viewModel.updateMarginOuter
                 )
+                .disabled(usesRecommendedPrintSettings)
             }
 
             Section("章タイトル") {
@@ -168,6 +271,14 @@ struct SettingsView: View {
                     set: { viewModel.updateIsPageNumberEnabled($0) }
                 ))
 
+                intStepper(
+                    title: "開始番号",
+                    value: viewModel.settings.pageNumberStart,
+                    unit: "",
+                    range: EditorSettings.pageNumberStartRange,
+                    update: viewModel.updatePageNumberStart
+                )
+
                 pageNumberFontNavigationRow
 
                 valueStepper(
@@ -197,26 +308,98 @@ struct SettingsView: View {
                 .disabled(!viewModel.isPageNumberFontUnlocked || !viewModel.settings.isPageNumberEnabled)
             }
         }
-        .alert("ノンブルデザイン設定", isPresented: $showsPageNumberDesignGuide) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("デザイン性の高いノンブル用フォント、サイズ、位置の変更は有料機能です。無料版では本文と同じフォントでページ番号のみを表示します。")
+        .listSectionSpacing(.compact)
+    }
+
+    private var editorSettingsForm: some View {
+        Form {
+            honkumiProSection
+
+            Section("編集画面") {
+                NavigationLink {
+                    editorFontSettingsView
+                } label: {
+                    HStack {
+                        Text("フォント")
+                        Spacer()
+                        Text(currentEditorFontDisplayName)
+                            .font(AppFontCatalog.swiftUIFont(
+                                selectedFontId: viewModel.settings.editorFontId,
+                                size: 16,
+                                isAdditionalFontPackUnlocked: true
+                            ))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                valueStepper(
+                    title: "文字サイズ",
+                    value: viewModel.settings.editorFontSize,
+                    range: EditorSettings.editorFontSizeRange,
+                    step: 0.5,
+                    format: "%.1f pt",
+                    update: viewModel.updateEditorFontSize
+                )
+            }
+        }
+        .listSectionSpacing(.compact)
+    }
+
+    private var honkumiProSection: some View {
+        Section("Honkumi Pro") {
+            if proStore.isProUnlocked {
+                Label("Honkumi Pro 購入済み", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+            } else {
+                Button {
+                    presentProPurchase(feature: nil)
+                } label: {
+                    HStack {
+                        Label("Honkumi Proを購入", systemImage: "lock.open")
+                        Spacer()
+                        if proStore.isLoadingProducts {
+                            ProgressView()
+                        } else if !proStore.displayPrice.isEmpty {
+                            Text(proStore.displayPrice)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+
+            Button {
+                Task {
+                    await proStore.restorePurchases()
+                }
+            } label: {
+                HStack {
+                    Text("購入を復元")
+                    Spacer()
+                    if proStore.isRestoring {
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(proStore.isBusy)
         }
     }
 
     private var formatSettingsForm: some View {
         Form {
             Section {
-                Toggle("本文入力時に自動フォーマット", isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { viewModel.settings.formatSettings.enableAutoFormat },
                     set: { newValue in
                         viewModel.updateFormatSettings {
                             $0.enableAutoFormat = newValue
                         }
                     }
-                ))
+                )) {
+                    Text("本文入力時に自動フォーマット")
+                }
 
-                Text("オンにした項目は、本文入力時に自動で反映されます。\n日本語入力の変換中はフォーマットされず、確定後に反映されます。")
+                Text("オンにした場合、本文入力時に自動でフォーマットされます。オフの場合、プレビュー・PDF出力時も本文を変更せずに表示します。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -247,6 +430,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .listSectionSpacing(.compact)
     }
 
     private var fontSettingsView: some View {
@@ -280,6 +464,38 @@ struct SettingsView: View {
         .navigationTitle("フォント設定")
     }
 
+    private var editorFontSettingsView: some View {
+        Form {
+            Section("フォント") {
+                ForEach(AppFontCatalog.all) { font in
+                    editorFontRow(font)
+                }
+            }
+
+            Section("フォントライセンス") {
+                ForEach(AppFontCatalog.all) { font in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(font.displayName)
+                            .font(AppFontCatalog.swiftUIFont(
+                                selectedFontId: font.id,
+                                size: 15,
+                                isAdditionalFontPackUnlocked: true
+                            ))
+                        Text(font.licenseName)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(font.copyrightText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .listSectionSpacing(.compact)
+        .navigationTitle("エディタフォント設定")
+    }
+
     private var pageNumberFontSettingsView: some View {
         Form {
             Section("本文フォント") {
@@ -297,7 +513,7 @@ struct SettingsView: View {
 
                         Spacer()
 
-                        if viewModel.settings.pageNumberFontId == nil {
+                        if viewModel.settings.pageNumberFontId == nil || !viewModel.isPageNumberFontUnlocked {
                             Image(systemName: "checkmark")
                                 .foregroundStyle(.blue)
                         }
@@ -340,7 +556,11 @@ struct SettingsView: View {
     }
 
     private var currentFontDisplayName: String {
-        AppFontCatalog.font(id: viewModel.settings.selectedFontId)?.displayName ?? "BIZ UD明朝"
+        AppFontCatalog.font(id: viewModel.printSettingsForDisplay.selectedFontId)?.displayName ?? "BIZ UD明朝"
+    }
+
+    private var currentEditorFontDisplayName: String {
+        AppFontCatalog.font(id: viewModel.settings.editorFontId)?.displayName ?? "BIZ UD明朝"
     }
 
     private var currentPageNumberFontDisplayName: String {
@@ -354,37 +574,24 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var pageNumberFontNavigationRow: some View {
-        if viewModel.isPageNumberFontUnlocked {
-            NavigationLink {
-                pageNumberFontSettingsView
-            } label: {
-                HStack {
-                    Text("ノンブル用フォント")
-                    Spacer()
-                    Text(currentPageNumberFontDisplayName)
-                        .font(AppFontCatalog.pageNumberSwiftUIFont(
-                            pageNumberFontId: viewModel.settings.pageNumberFontId,
-                            bodyFontId: viewModel.settings.selectedFontId,
-                            size: 17,
-                            isPageNumberFontUnlocked: true
-                        ))
-                        .foregroundStyle(.secondary)
+        NavigationLink {
+            pageNumberFontSettingsView
+        } label: {
+            HStack {
+                Text("ノンブル用フォント")
+                Spacer()
+                Text(currentPageNumberFontDisplayName)
+                    .font(AppFontCatalog.pageNumberSwiftUIFont(
+                        pageNumberFontId: viewModel.settings.pageNumberFontId,
+                        bodyFontId: viewModel.settings.selectedFontId,
+                        size: 17,
+                        isPageNumberFontUnlocked: viewModel.isPageNumberFontUnlocked
+                    ))
+                    .foregroundStyle(.secondary)
+                if !viewModel.isPageNumberFontUnlocked {
+                    paidFeatureBadge
                 }
             }
-        } else {
-            Button {
-                showsPageNumberDesignGuide = true
-            } label: {
-                HStack {
-                    Text("ノンブル用フォント")
-                    Spacer()
-                    Text("本文と同じ")
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "lock.fill")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .foregroundStyle(.primary)
         }
     }
 
@@ -415,10 +622,42 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private func pageNumberFontRow(_ font: PageNumberFont) -> some View {
-        let isSelected = viewModel.settings.pageNumberFontId == font.id
+    private func editorFontRow(_ font: AppFont) -> some View {
+        let isSelected = viewModel.settings.editorFontId == font.id
 
         return Button {
+            viewModel.updateEditorFontId(font.id)
+        } label: {
+            HStack(spacing: 12) {
+                Text(font.displayName)
+                    .font(AppFontCatalog.swiftUIFont(
+                        selectedFontId: font.id,
+                        size: 17,
+                        isAdditionalFontPackUnlocked: true
+                    ))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.blue)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func pageNumberFontRow(_ font: PageNumberFont) -> some View {
+        let isLocked = !viewModel.isPageNumberFontUnlocked
+        let isSelected = viewModel.isPageNumberFontUnlocked && viewModel.settings.pageNumberFontId == font.id
+
+        return Button {
+            guard !isLocked else {
+                presentProPurchase(feature: .pageNumberFonts)
+                return
+            }
             viewModel.updatePageNumberFontId(font.id)
         } label: {
             HStack(spacing: 12) {
@@ -451,6 +690,8 @@ struct SettingsView: View {
                 if isSelected {
                     Image(systemName: "checkmark")
                         .foregroundStyle(.blue)
+                } else if isLocked {
+                    paidFeatureBadge
                 }
             }
             .contentShape(Rectangle())
@@ -535,12 +776,19 @@ struct SettingsView: View {
 
         return Toggle(isOn: Binding(
             get: { viewModel.settings.formatSettings[keyPath: rule.id] },
-            set: { viewModel.updateFormatRule(rule.id, isEnabled: $0) }
+            set: { newValue in
+                guard !isLocked else {
+                    presentProPurchase(feature: .formatting)
+                    return
+                }
+                viewModel.updateFormatRule(rule.id, isEnabled: newValue)
+            }
         )) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(rule.label)
-                    if rule.premium {
+                        .foregroundStyle(.primary)
+                    if rule.premium && !viewModel.isPremiumUser {
                         paidFeatureBadge
                     }
                 }
@@ -549,25 +797,39 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
         }
-        .disabled(isLocked)
+        .opacity(isLocked ? 0.82 : 1)
     }
 
     private var paidFeatureBadge: some View {
-        Text("有料")
+        Label("有料", systemImage: "lock.fill")
+            .labelStyle(.titleAndIcon)
             .font(.caption2.weight(.bold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(Color.blue, in: Capsule())
+    }
+
+    private var purchaseMessageBinding: Binding<HonkumiProPurchaseMessage?> {
+        Binding(
+            get: { proStore.purchaseMessage },
+            set: { _ in proStore.clearPurchaseMessage() }
+        )
+    }
+
+    private func presentProPurchase(feature: HonkumiProFeature?) {
+        presentedProFeature = feature
+        isProPurchasePresented = true
     }
 
 }
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
-    case print
+    case editor
     case format
+    case print
 
     var id: String { rawValue }
 
@@ -575,8 +837,10 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .print:
             "印刷設定"
+        case .editor:
+            "エディタ設定"
         case .format:
-            "フォーマット設定"
+            "フォーマット"
         }
     }
 }

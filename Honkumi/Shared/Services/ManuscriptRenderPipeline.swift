@@ -58,7 +58,7 @@ nonisolated enum ManuscriptRenderPipeline {
         from document: ManuscriptDocument,
         subscriptionStatus: SubscriptionStatus
     ) -> ManuscriptDocument {
-        let settings = document.settings.validated
+        let settings = RecommendedPrintSettings.effectiveSettings(for: document)
         var preparedDocument = document
         preparedDocument.settings = settings
         preparedDocument.body = ManuscriptFormatter.formatManuscriptText(
@@ -66,7 +66,24 @@ nonisolated enum ManuscriptRenderPipeline {
             settings: settings.formatSettings,
             options: FormatOptions(isPremiumUser: subscriptionStatus == .paid)
         )
-        return preparedDocument
+        return PrintTextNormalizer.normalizedDocument(preparedDocument)
+    }
+
+    static func printTextNormalizationReport(
+        for document: ManuscriptDocument,
+        subscriptionStatus: SubscriptionStatus
+    ) -> PrintTextNormalizationReport {
+        let settings = RecommendedPrintSettings.effectiveSettings(for: document)
+        let formattedBody = ManuscriptFormatter.formatManuscriptText(
+            document.body,
+            settings: settings.formatSettings,
+            options: FormatOptions(isPremiumUser: subscriptionStatus == .paid)
+        )
+        return PrintTextNormalizer.report(
+            title: document.title,
+            body: formattedBody,
+            colophon: settings.colophon.validated
+        )
     }
 
     private static func cachedPaginationResult(forKey key: String) -> ManuscriptPaginationResult? {

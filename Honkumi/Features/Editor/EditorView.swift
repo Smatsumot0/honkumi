@@ -3,12 +3,11 @@ import SwiftUI
 struct EditorView: View {
     @StateObject var viewModel: EditorViewModel
     @Binding var scrollOffset: CGPoint
+    @Binding var isEditorChromeVisible: Bool
     @State private var selectedRange = NSRange(location: 0, length: 0)
     @State private var requestedSelectedRange: NSRange?
     @State private var isBodyEditorActive = false
     @State private var editorCommand: ManuscriptTextEditorCommand?
-    @State private var showsChapterTitleAlert = false
-    @State private var chapterTitle = ""
     @State private var showsSearchReplaceSheet = false
     @State private var searchText = ""
     @State private var replacementText = ""
@@ -16,7 +15,10 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            chapterNavigationToolbar
+            if isEditorChromeVisible {
+                chapterNavigationToolbar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
 
             if showsSearchReplaceSheet {
                 searchReplacePanel
@@ -32,10 +34,12 @@ struct EditorView: View {
                 contentOffset: $scrollOffset,
                 isEditing: $isBodyEditorActive,
                 command: $editorCommand,
-                selectedFontId: viewModel.document.settings.selectedFontId,
+                editorFontId: viewModel.document.settings.editorFontId,
+                editorFontSize: viewModel.document.settings.editorFontSize,
                 isAdditionalFontPackUnlocked: viewModel.isAdditionalFontPackUnlocked,
                 formatSettings: viewModel.formatSettings,
-                formatOptions: viewModel.formatOptions
+                formatOptions: viewModel.formatOptions,
+                onScrollDirectionChange: handleScrollDirection
             )
             .padding(8)
             .overlay(alignment: .topLeading) {
@@ -48,37 +52,38 @@ struct EditorView: View {
                 }
             }
 
-            HStack {
-                Text("\(viewModel.characterCount)文字")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Text("\(viewModel.pageCount)ページ")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Text("400字換算 \(viewModel.manuscriptSheetCount)枚")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 10)
-            .background(.bar)
-
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             insertionToolbar
         }
-        .alert("章タイトルを挿入", isPresented: $showsChapterTitleAlert) {
-            TextField("章タイトル", text: $chapterTitle)
-            Button("挿入") {
-                insertChapterTitle()
-            }
-            Button("キャンセル", role: .cancel) {}
+        .animation(.easeInOut(duration: 0.18), value: isEditorChromeVisible)
+    }
+
+    private var editorCounts: some View {
+        HStack(spacing: 10) {
+            Text("\(viewModel.characterCount)文字")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Text("\(viewModel.pageCount)ページ")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var chapterNavigationToolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                HStack(spacing: 8) {
+            HStack(spacing: 12) {
+                HStack(spacing: 2) {
+                    Button {
+                        moveToTop()
+                    } label: {
+                        Image(systemName: "arrow.up.to.line")
+                    }
+                    .accessibilityLabel("一番上まで移動")
+                    .disabled(selectedRange.location == 0)
+
                     Button {
                         moveUp()
                     } label: {
@@ -103,70 +108,49 @@ struct EditorView: View {
                     .accessibilityLabel("一番下に移動")
                     .disabled(!viewModel.canMoveDown(from: selectedRange))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .padding(3)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+                .buttonStyle(EditorToolButtonStyle())
 
-                Divider()
-                    .frame(height: 28)
-
-                HStack(spacing: 8) {
-                    Button {
-                        applyUndo()
-                    } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                    }
-                    .accessibilityLabel("取り消す")
-
-                    Button {
-                        applyRedo()
-                    } label: {
-                        Image(systemName: "arrow.uturn.forward")
-                    }
-                    .accessibilityLabel("やり直す")
-
-                    Button {
-                        withAnimation(.snappy(duration: 0.2)) {
-                            showsSearchReplaceSheet.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .accessibilityLabel("検索と置換")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .padding(3)
-                .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8))
+                editorCounts
 
                 Spacer(minLength: 0)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 2)
         .background(.bar)
     }
 
     private var insertionToolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: 2) {
+                Button {
+                    applyUndo()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .accessibilityLabel("取り消す")
+
+                Button {
+                    applyRedo()
+                } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                }
+                .accessibilityLabel("やり直す")
+
                 insertionButton("「」", cursorOffsetFromEnd: 1)
                 insertionButton("（）", cursorOffsetFromEnd: 1)
+                insertionButton("\"\"", cursorOffsetFromEnd: 1)
                 insertionButton("…", inserts: "……")
                 insertionButton("〜")
                 insertionButton("─", inserts: "──")
                 insertionButton("ー", inserts: "ーー")
                 Button {
-                    chapterTitle = ""
-                    showsChapterTitleAlert = true
+                    insertText("# ")
                 } label: {
                     ChapterTitleBannerIcon()
-                        .frame(width: 18, height: 14)
+                        .frame(width: 16, height: 13)
                 }
                 .accessibilityLabel("章タイトル")
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 insertionIconButton(
                     systemImage: "arrow.turn.down.left",
                     accessibilityLabel: "改ページ",
@@ -177,26 +161,27 @@ struct EditorView: View {
                     accessibilityLabel: "全角スペース",
                     inserts: "　"
                 )
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        showsSearchReplaceSheet.toggle()
+                    }
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("検索と置換")
             }
+            .buttonStyle(EditorToolButtonStyle())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.thinMaterial)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 2)
+        .background(.bar)
     }
 
     private func insertionButton(_ title: String, inserts text: String? = nil, cursorOffsetFromEnd: Int = 0) -> some View {
         Button(title) {
-            let insertedRange = viewModel.insert(
-                text ?? title,
-                replacing: selectedRange,
-                cursorOffsetFromEnd: cursorOffsetFromEnd
-            )
-            selectedRange = insertedRange
-            requestedSelectedRange = insertedRange
+            insertText(text ?? title, cursorOffsetFromEnd: cursorOffsetFromEnd)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
     }
 
     private func insertionTextButton(
@@ -206,17 +191,9 @@ struct EditorView: View {
         cursorOffsetFromEnd: Int = 0
     ) -> some View {
         Button(title) {
-            let insertedRange = viewModel.insert(
-                text,
-                replacing: selectedRange,
-                cursorOffsetFromEnd: cursorOffsetFromEnd
-            )
-            selectedRange = insertedRange
-            requestedSelectedRange = insertedRange
+            insertText(text, cursorOffsetFromEnd: cursorOffsetFromEnd)
         }
         .accessibilityLabel(accessibilityLabel)
-        .buttonStyle(.bordered)
-        .controlSize(.small)
     }
 
     private func insertionIconButton(
@@ -226,19 +203,11 @@ struct EditorView: View {
         cursorOffsetFromEnd: Int = 0
     ) -> some View {
         Button {
-            let insertedRange = viewModel.insert(
-                text,
-                replacing: selectedRange,
-                cursorOffsetFromEnd: cursorOffsetFromEnd
-            )
-            selectedRange = insertedRange
-            requestedSelectedRange = insertedRange
+            insertText(text, cursorOffsetFromEnd: cursorOffsetFromEnd)
         } label: {
             Image(systemName: systemImage)
         }
         .accessibilityLabel(accessibilityLabel)
-        .buttonStyle(.bordered)
-        .controlSize(.small)
     }
 
     private var searchReplacePanel: some View {
@@ -299,24 +268,34 @@ struct EditorView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(.thinMaterial)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
-    private func insertChapterTitle() {
-        let trimmedTitle = chapterTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTitle.isEmpty else { return }
-
+    private func insertText(_ text: String, cursorOffsetFromEnd: Int = 0) {
         let insertedRange = viewModel.insert(
-            "\n\(ManuscriptMarkupParser.chapterTag(for: trimmedTitle))\n",
-            replacing: selectedRange
+            text,
+            replacing: selectedRange,
+            cursorOffsetFromEnd: cursorOffsetFromEnd
         )
         selectedRange = insertedRange
         requestedSelectedRange = insertedRange
     }
 
+    private func handleScrollDirection(_ direction: ManuscriptTextEditorScrollDirection) {
+        if !isEditorChromeVisible {
+            isEditorChromeVisible = true
+        }
+    }
+
     private func moveUp() {
         guard let range = viewModel.rangeForMovingUp(from: selectedRange) else { return }
+        selectedRange = range
+        requestedSelectedRange = range
+    }
+
+    private func moveToTop() {
+        let range = viewModel.rangeForMovingToTop()
         selectedRange = range
         requestedSelectedRange = range
     }
@@ -400,6 +379,25 @@ struct EditorView: View {
         guard let range = viewModel.redo(currentRange: selectedRange) else { return }
         selectedRange = range
         requestedSelectedRange = range
+    }
+}
+
+private struct EditorToolButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(isEnabled ? Color.secondary : Color.secondary.opacity(0.42))
+            .frame(minWidth: 34, minHeight: 34)
+            .padding(.horizontal, 1)
+            .contentShape(Rectangle())
+            .background {
+                if configuration.isPressed {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.secondary.opacity(0.10))
+                }
+            }
     }
 }
 

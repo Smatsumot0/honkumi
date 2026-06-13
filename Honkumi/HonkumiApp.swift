@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct HonkumiApp: App {
     @StateObject private var documentStore = DocumentStore()
+    @StateObject private var proStore = HonkumiProStore()
 
     init() {
         AppFontCatalog.registerBundledFonts()
@@ -13,7 +14,7 @@ struct HonkumiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(documentStore: documentStore)
+            ContentView(documentStore: documentStore, proStore: proStore)
         }
     }
 }

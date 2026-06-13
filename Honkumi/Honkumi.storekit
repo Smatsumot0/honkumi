@@ -1,0 +1,39 @@
+{
+  "identifier" : "F33C6BB7-CC82-4D0B-A629-560057FDF8BE",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "¥1,500",
+      "familyShareable" : false,
+      "internalID" : "4C42C8E8-5DC6-45B3-B72E-6B32B48A0A0C",
+      "localizations" : [
+        {
+          "description" : "有料ノンブルフォント、サークルロゴ、整形機能、PDF出力時の広告非表示を解放します。",
+          "displayName" : "Honkumi Pro",
+          "locale" : "ja_JP"
+        },
+        {
+          "description" : "Unlocks paid page-number fonts, circle logos, formatting, and ad-free PDF export.",
+          "displayName" : "Honkumi Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "honkumi.pro",
+      "referenceName" : "Honkumi Pro",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "jp.honkumi.Honkumi",
+    "_developerTeamID" : "ZLY283MC2H"
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

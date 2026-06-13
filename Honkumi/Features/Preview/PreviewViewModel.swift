@@ -8,24 +8,28 @@ nonisolated struct PreviewPage: Identifiable, Equatable {
     let startsAfterPageBreak: Bool
     let chapterTitle: String?
     let chapterTitlesStartingOnPage: [String]
+    let tableOfContentsEntries: [TableOfContentsEntry]
 
     init(
         kind: PreviewPageKind = .body,
         columns: [String],
         startsAfterPageBreak: Bool,
         chapterTitle: String?,
-        chapterTitlesStartingOnPage: [String] = []
+        chapterTitlesStartingOnPage: [String] = [],
+        tableOfContentsEntries: [TableOfContentsEntry] = []
     ) {
         self.kind = kind
         self.columns = columns
         self.startsAfterPageBreak = startsAfterPageBreak
         self.chapterTitle = chapterTitle
         self.chapterTitlesStartingOnPage = chapterTitlesStartingOnPage
+        self.tableOfContentsEntries = tableOfContentsEntries
     }
 }
 
 nonisolated enum PreviewPageKind: Equatable {
     case body
+    case tableOfContents
     case colophon(ColophonSettings)
 }
 
@@ -60,6 +64,11 @@ nonisolated struct VerticalHorizontalColophonEntry: Identifiable, Equatable {
     let columnIndex: Int
 }
 
+private struct TableOfContentsPaginationRow {
+    let text: String
+    let entry: TableOfContentsEntry?
+}
+
 nonisolated enum ManuscriptPaginator {
     private static let maxTableOfContentsPasses = 6
 
@@ -72,7 +81,7 @@ nonisolated enum ManuscriptPaginator {
             settings: settings,
             workTitle: document.title,
             tableOfContentsEntries: []
-        ))
+        ), settings: settings)
 
         guard settings.showTableOfContents else {
             return appendingColophonIfNeeded(
@@ -90,7 +99,7 @@ nonisolated enum ManuscriptPaginator {
             tableOfContentsEntries: tableOfContentsEntries
         )
         for _ in 0..<maxTableOfContentsPasses {
-            let updatedEntries = chapterEntries(in: pages)
+            let updatedEntries = chapterEntries(in: pages, settings: settings)
             if updatedEntries == tableOfContentsEntries {
                 return appendingColophonIfNeeded(
                     to: pages,
@@ -148,25 +157,35 @@ nonisolated enum ManuscriptPaginator {
         let maxLines = max(settings.linesPerPage, 1)
         var pages: [PreviewPage] = []
         var currentLines: [String] = []
+        var currentPageKind: PreviewPageKind = .body
         var currentChapterTitle: String?
         var currentStartsAfterPageBreak = false
         var currentChapterStarts: [String] = []
+        var currentTableOfContentsEntries: [TableOfContentsEntry] = []
 
         func appendCurrentPage() {
             guard !currentLines.isEmpty || pages.isEmpty else {
+                currentPageKind = .body
                 currentStartsAfterPageBreak = false
                 currentChapterStarts = []
+                currentTableOfContentsEntries = []
                 return
             }
             pages.append(PreviewPage(
+                kind: currentPageKind,
                 columns: currentLines.isEmpty ? [""] : currentLines,
                 startsAfterPageBreak: currentStartsAfterPageBreak,
                 chapterTitle: currentChapterTitle,
-                chapterTitlesStartingOnPage: currentChapterStarts
+                chapterTitlesStartingOnPage: currentChapterStarts,
+                tableOfContentsEntries: currentPageKind == .tableOfContents
+                    ? currentTableOfContentsEntries
+                    : []
             ))
             currentLines = []
+            currentPageKind = .body
             currentStartsAfterPageBreak = false
             currentChapterStarts = []
+            currentTableOfContentsEntries = []
         }
 
         for (segmentIndex, segment) in segments.enumerated() {
@@ -196,6 +215,29 @@ nonisolated enum ManuscriptPaginator {
                 currentChapterStarts.append(chapterTitle)
             }
 
+            if segment.isTableOfContentsPlaceholder {
+                if !currentLines.isEmpty {
+                    appendCurrentPage()
+                    currentStartsAfterPageBreak = true
+                }
+                currentPageKind = .tableOfContents
+                for row in tableOfContentsRows(entries: tableOfContentsEntries, settings: settings) {
+                    currentLines.append(row.text)
+                    if let entry = row.entry {
+                        currentTableOfContentsEntries.append(entry)
+                    }
+
+                    if currentLines.count >= maxLines {
+                        appendCurrentPage()
+                        currentPageKind = .tableOfContents
+                    }
+                }
+
+                appendCurrentPage()
+                currentStartsAfterPageBreak = true
+                continue
+            }
+
             let text = previewText(for: segment, settings: settings, tableOfContentsEntries: tableOfContentsEntries)
             let lines = makeVerticalLines(
                 from: text,
@@ -210,6 +252,9 @@ nonisolated enum ManuscriptPaginator {
 
                 if currentLines.count >= maxLines {
                     appendCurrentPage()
+                    if segment.isTableOfContentsPlaceholder {
+                        currentPageKind = .tableOfContents
+                    }
                 }
             }
 
@@ -223,12 +268,23 @@ nonisolated enum ManuscriptPaginator {
         return pages.isEmpty ? [PreviewPage(columns: [""], startsAfterPageBreak: false, chapterTitle: nil)] : pages
     }
 
-    private static func chapterEntries(in pages: [PreviewPage]) -> [TableOfContentsEntry] {
-        pages.enumerated().flatMap { index, page in
-            page.chapterTitlesStartingOnPage.map { title in
-                TableOfContentsEntry(title: title, pageNumber: index + 1)
+    private static func chapterEntries(in pages: [PreviewPage], settings: EditorSettings) -> [TableOfContentsEntry] {
+        var pageNumber = settings.pageNumberStart
+        var entries: [TableOfContentsEntry] = []
+
+        for page in pages {
+            switch page.kind {
+            case .body:
+                entries.append(contentsOf: page.chapterTitlesStartingOnPage.map { title in
+                    TableOfContentsEntry(title: title, pageNumber: pageNumber)
+                })
+                pageNumber += 1
+            case .tableOfContents, .colophon:
+                continue
             }
         }
+
+        return entries
     }
 
     private static func appendingColophonIfNeeded(
@@ -309,12 +365,6 @@ nonisolated enum ManuscriptPaginator {
                 value: "",
                 addsFollowingSpace: false,
                 centersInHorizontalLayout: true
-            ),
-            ColophonEntry(
-                id: "publisher",
-                label: "発行者",
-                value: colophon.showsPublisherName ? colophon.publisherName : "",
-                addsFollowingSpace: false
             ),
             ColophonEntry(
                 id: "author",
@@ -398,6 +448,25 @@ nonisolated enum ManuscriptPaginator {
         return ([title, ""] + lines).joined(separator: "\n")
     }
 
+    private static func tableOfContentsRows(
+        entries: [TableOfContentsEntry],
+        settings: EditorSettings
+    ) -> [TableOfContentsPaginationRow] {
+        let title = tableOfContentsTitle(settings: settings)
+        guard !entries.isEmpty else {
+            return [TableOfContentsPaginationRow(text: title, entry: nil)]
+        }
+
+        let entryRows = entries.map { entry in
+            TableOfContentsPaginationRow(
+                text: entry.title + tableOfContentsPageNumber(entry.pageNumber),
+                entry: entry
+            )
+        }
+        return [TableOfContentsPaginationRow(text: title, entry: nil), TableOfContentsPaginationRow(text: "", entry: nil)]
+            + entryRows
+    }
+
     private static func tableOfContentsLine(for entry: TableOfContentsEntry, settings: EditorSettings) -> String {
         let pageNumber = tableOfContentsPageNumber(entry.pageNumber)
         let titleCellCount = VerticalTextTypesetter.cellCount(
@@ -408,30 +477,35 @@ nonisolated enum ManuscriptPaginator {
             for: pageNumber,
             alphanumericOrientation: settings.alphanumericOrientation
         )
-        let leaderCount = max(settings.charactersPerLine - titleCellCount - pageNumberCellCount, 0)
-        let separator = String(repeating: tableOfContentsLeader, count: leaderCount)
+        let availableCellCount = max(settings.charactersPerLine - titleCellCount - pageNumberCellCount, 0)
+        let separator = tableOfContentsSeparator(
+            availableCellCount: availableCellCount,
+            settings: settings
+        )
         return entry.title + separator + pageNumber
     }
 
     private static let tableOfContentsLeader = "︙"
 
+    private static func tableOfContentsSeparator(availableCellCount: Int, settings: EditorSettings) -> String {
+        guard availableCellCount > 0 else { return "" }
+        let sideSpaceCount = 2
+        let reservedSpaceCount = sideSpaceCount * 2
+        guard availableCellCount > reservedSpaceCount else {
+            return String(repeating: "　", count: availableCellCount)
+        }
+        let leader = tableOfContentsLeader
+        let dottedLeader = Array(repeating: leader, count: availableCellCount - reservedSpaceCount).joined()
+        let sideSpaces = String(repeating: "　", count: sideSpaceCount)
+        return sideSpaces + dottedLeader + sideSpaces
+    }
+
     private static func tableOfContentsPageNumber(_ pageNumber: Int) -> String {
-        String(pageNumber).map { character in
-            guard let digit = character.wholeNumberValue else {
-                return String(character)
-            }
-            let scalar = UnicodeScalar(0xFF10 + digit)!
-            return String(Character(scalar))
-        }.joined()
+        VerticalTextTypesetter.horizontalRun(String(pageNumber))
     }
 
     private static func tableOfContentsTitle(settings: EditorSettings) -> String {
-        guard settings.chapterTitleStyle == .centered else {
-            return "目次"
-        }
-
-        let leadingSpaces = max((settings.charactersPerLine - "目次".count) / 2, 0)
-        return String(repeating: "　", count: leadingSpaces) + "目次"
+        "目次"
     }
 
     private static func formattedBodyChapterTitle(_ title: String, settings: EditorSettings) -> String {
@@ -492,7 +566,9 @@ nonisolated enum ManuscriptPaginator {
               !indentExemptLines.contains(trimmedLine),
               !normalizedLine.hasPrefix("　"),
               !normalizedLine.hasPrefix("「"),
-              !normalizedLine.hasPrefix("『") else {
+              !normalizedLine.hasPrefix("『"),
+              !normalizedLine.hasPrefix("“"),
+              !normalizedLine.hasPrefix("〝") else {
             return normalizedLine
         }
 
@@ -648,7 +724,7 @@ nonisolated enum ManuscriptPaginator {
     }
 
     private static func isClosingQuote(_ character: String) -> Bool {
-        ["」", "』", "）", "】", "〉", "》", "］", "｝"].contains(character)
+        ["」", "』", "”", "〟", "〞", "）", "】", "〉", "》", "］", "｝"].contains(character)
     }
 
     private static func isSingleBaseCharacter(_ text: String) -> Bool {
@@ -668,35 +744,43 @@ nonisolated struct TableOfContentsEntry: Equatable {
     let pageNumber: Int
 }
 
+nonisolated enum PreviewPDFKind: String, Equatable {
+    case normal
+    case spread
+}
+
 @MainActor
 final class PreviewViewModel: ObservableObject {
     @Published private(set) var document: ManuscriptDocument
-    @Published private(set) var pages: [PreviewPage]
-    @Published private(set) var isPaginating = false
+    @Published private(set) var previewPDFURL: URL?
+    @Published private(set) var isGeneratingPDF = false
+    @Published private(set) var generationErrorMessage: String?
 
     private let documentStore: DocumentStore
+    private let pdfExportService = PDFExportService()
     private var cancellables = Set<AnyCancellable>()
-    private var paginationTask: Task<Void, Never>?
-    private var paginationGeneration = 0
-    private var layoutCacheSettings: EditorSettings?
-    private var layoutCache: [Int: PageLayout] = [:]
+    private var generationTask: Task<Void, Never>?
+    private var generation = 0
     private var isPreviewActive = false
+    private var activePreviewKind: PreviewPDFKind = .normal
 
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
         self.document = documentStore.document.applyingPublisherInfo(from: documentStore.userDefaultSettings)
-        self.pages = [PreviewPage(columns: [""], startsAfterPageBreak: false, chapterTitle: nil)]
 
         documentStore.$document
             .sink { [weak self] document in
                 guard let self else { return }
                 let previewDocument = self.previewDocument(from: document)
                 self.document = previewDocument
-                self.clearLayoutCacheIfNeeded(for: previewDocument.settings.validated)
                 if self.isPreviewActive {
-                    self.schedulePagination(for: previewDocument, debounceMilliseconds: 350)
+                    self.schedulePDFGeneration(
+                        for: previewDocument,
+                        kind: self.activePreviewKind,
+                        debounceMilliseconds: 350
+                    )
                 } else {
-                    self.cancelInactivePagination()
+                    self.cancelInactiveGeneration()
                 }
             }
             .store(in: &cancellables)
@@ -710,15 +794,18 @@ final class PreviewViewModel: ObservableObject {
                 guard let self else { return }
                 let previewDocument = self.previewDocument(from: self.documentStore.document)
                 self.document = previewDocument
-                self.clearLayoutCacheIfNeeded(for: previewDocument.settings.validated)
                 guard self.isPreviewActive else { return }
-                self.schedulePagination(for: previewDocument, debounceMilliseconds: 0)
+                self.schedulePDFGeneration(
+                    for: previewDocument,
+                    kind: self.activePreviewKind,
+                    debounceMilliseconds: 0
+                )
             }
             .store(in: &cancellables)
     }
 
     deinit {
-        paginationTask?.cancel()
+        generationTask?.cancel()
     }
 
     var subscriptionStatus: SubscriptionStatus {
@@ -733,77 +820,102 @@ final class PreviewViewModel: ObservableObject {
         documentStore.isPageNumberFontUnlocked
     }
 
-    func layout(for pageNumber: Int) -> PageLayout {
-        let settings = document.settings.validated
-        clearLayoutCacheIfNeeded(for: settings)
-        if let cachedLayout = layoutCache[pageNumber] {
-            return cachedLayout
+    var displayTitle: String {
+        let trimmedTitle = document.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? "Honkumi" : trimmedTitle
+    }
+
+    func preparePreviewIfNeeded(for kind: PreviewPDFKind = .normal) {
+        if activePreviewKind != kind {
+            activePreviewKind = kind
+            guard isPreviewActive else { return }
+            schedulePDFGeneration(
+                for: previewDocument(from: documentStore.document),
+                kind: kind,
+                debounceMilliseconds: 0
+            )
+            return
         }
 
-        let layout = LayoutCalculator.layout(for: settings, pageNumber: pageNumber)
-        layoutCache[pageNumber] = layout
-        return layout
+        guard isPreviewActive, !isGeneratingPDF, previewPDFURL == nil else { return }
+        schedulePDFGeneration(
+            for: previewDocument(from: documentStore.document),
+            kind: kind,
+            debounceMilliseconds: 0
+        )
     }
 
-    func preparePreviewIfNeeded() {
-        guard isPreviewActive else { return }
-        schedulePagination(for: previewDocument(from: documentStore.document), debounceMilliseconds: 0)
-    }
-
-    func setPreviewActive(_ isActive: Bool) {
+    func setPreviewActive(_ isActive: Bool, kind: PreviewPDFKind = .normal) {
         guard isPreviewActive != isActive else {
             if isActive {
-                preparePreviewIfNeeded()
+                preparePreviewIfNeeded(for: kind)
+            } else {
+                activePreviewKind = kind
             }
             return
         }
 
+        activePreviewKind = kind
         isPreviewActive = isActive
         if isActive {
-            preparePreviewIfNeeded()
+            preparePreviewIfNeeded(for: kind)
         } else {
-            cancelInactivePagination()
+            cancelInactiveGeneration()
+            clearCurrentPreviewPDF()
         }
     }
 
-    private func schedulePagination(for document: ManuscriptDocument, debounceMilliseconds: UInt64) {
-        paginationTask?.cancel()
-        paginationGeneration += 1
-        let generation = paginationGeneration
+    private func schedulePDFGeneration(
+        for document: ManuscriptDocument,
+        kind: PreviewPDFKind,
+        debounceMilliseconds: UInt64
+    ) {
+        generationTask?.cancel()
+        generation += 1
+        let generationID = generation
         let documentSnapshot = document
+        let previewKind = kind
         let subscriptionStatus = documentStore.subscriptionStatus
+        let pdfExportService = pdfExportService
+        clearCurrentPreviewPDF()
+        isGeneratingPDF = true
+        generationErrorMessage = nil
 
-        if let cachedResult = ManuscriptRenderPipeline.cachedPaginationResult(
-            for: documentSnapshot,
-            subscriptionStatus: subscriptionStatus
-        ) {
-            applyPagination(
-                result: cachedResult,
-                generation: generation,
-                documentID: documentSnapshot.id
-            )
-            return
-        }
+        generationTask = Task { [weak self] in
+            var generatedURL: URL?
+            do {
+                if debounceMilliseconds > 0 {
+                    try await Task.sleep(for: .milliseconds(debounceMilliseconds))
+                }
 
-        isPaginating = true
+                try Task.checkCancellation()
+                let outputURL = try await pdfExportService.exportPreviewPDF(
+                    document: documentSnapshot,
+                    subscriptionStatus: subscriptionStatus,
+                    previewKind: previewKind,
+                    generationID: UUID()
+                )
+                generatedURL = outputURL
+                try Self.validateGeneratedPDF(at: outputURL)
+                try Task.checkCancellation()
 
-        paginationTask = Task.detached(priority: .utility) { [weak self] in
-            if debounceMilliseconds > 0 {
-                try? await Task.sleep(for: .milliseconds(debounceMilliseconds))
-                guard !Task.isCancelled else { return }
+                self?.applyGeneratedPDF(
+                    at: outputURL,
+                    generation: generationID,
+                    documentID: documentSnapshot.id,
+                    kind: previewKind
+                )
+            } catch is CancellationError {
+                self?.cleanupPreviewPDF(at: generatedURL)
+                self?.discardCancelledGeneration(generation: generationID)
+            } catch {
+                self?.applyGenerationError(
+                    error,
+                    generation: generationID,
+                    documentID: documentSnapshot.id,
+                    kind: previewKind
+                )
             }
-
-            let result = ManuscriptRenderPipeline.paginationResult(
-                for: documentSnapshot,
-                subscriptionStatus: subscriptionStatus
-            )
-            guard !Task.isCancelled else { return }
-
-            await self?.applyPagination(
-                result: result,
-                generation: generation,
-                documentID: documentSnapshot.id
-            )
         }
     }
 
@@ -811,23 +923,86 @@ final class PreviewViewModel: ObservableObject {
         document.applyingPublisherInfo(from: documentStore.userDefaultSettings)
     }
 
-    private func applyPagination(result: ManuscriptPaginationResult, generation: Int, documentID: UUID) {
-        guard paginationGeneration == generation, document.id == documentID else { return }
-        self.document = result.document
-        clearLayoutCacheIfNeeded(for: result.document.settings.validated)
-        self.pages = result.pages
-        self.isPaginating = false
+    private func applyGeneratedPDF(
+        at url: URL,
+        generation: Int,
+        documentID: UUID,
+        kind: PreviewPDFKind
+    ) {
+        guard self.generation == generation,
+              document.id == documentID,
+              activePreviewKind == kind,
+              isPreviewActive else {
+            cleanupPreviewPDF(at: url)
+            return
+        }
+
+        previewPDFURL = url
+        isGeneratingPDF = false
+        generationErrorMessage = nil
     }
 
-    private func cancelInactivePagination() {
-        paginationTask?.cancel()
-        paginationTask = nil
-        isPaginating = false
+    private func applyGenerationError(
+        _ error: Error,
+        generation: Int,
+        documentID: UUID,
+        kind: PreviewPDFKind
+    ) {
+        guard self.generation == generation,
+              document.id == documentID,
+              activePreviewKind == kind,
+              isPreviewActive else { return }
+        previewPDFURL = nil
+        isGeneratingPDF = false
+        generationErrorMessage = error.localizedDescription
     }
 
-    private func clearLayoutCacheIfNeeded(for settings: EditorSettings) {
-        guard layoutCacheSettings != settings else { return }
-        layoutCacheSettings = settings
-        layoutCache.removeAll(keepingCapacity: true)
+    private func discardCancelledGeneration(generation: Int) {
+        guard self.generation == generation else { return }
+        isGeneratingPDF = false
+    }
+
+    private func cancelInactiveGeneration() {
+        generationTask?.cancel()
+        generationTask = nil
+        isGeneratingPDF = false
+    }
+
+    private func clearCurrentPreviewPDF() {
+        let url = previewPDFURL
+        previewPDFURL = nil
+        generationErrorMessage = nil
+        cleanupPreviewPDF(at: url)
+    }
+
+    private func cleanupPreviewPDF(at url: URL?) {
+        guard let url else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static func validateGeneratedPDF(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw PreviewPDFGenerationError.fileNotFound
+        }
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let fileSize = attributes[.size] as? NSNumber
+        guard (fileSize?.int64Value ?? 0) > 0 else {
+            throw PreviewPDFGenerationError.emptyFile
+        }
+    }
+}
+
+private enum PreviewPDFGenerationError: LocalizedError {
+    case fileNotFound
+    case emptyFile
+
+    var errorDescription: String? {
+        switch self {
+        case .fileNotFound:
+            "プレビュー用PDFを生成できませんでした。もう一度プレビューを開いてください。"
+        case .emptyFile:
+            "プレビュー用PDFが空です。本文とPDF設定を確認してください。"
+        }
     }
 }

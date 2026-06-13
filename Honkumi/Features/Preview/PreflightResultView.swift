@@ -155,6 +155,8 @@ struct PreflightResultView: View {
             parts.append("奥付")
         case .toc:
             parts.append("目次")
+        case .pdf:
+            parts.append("PDF")
         }
 
         if let pageNumber = location.pageNumber {
@@ -176,6 +178,7 @@ struct PDFShareSheetView: View {
     @State private var isOpeningShareMenu = false
     @State private var isShareSheetPresented = false
     @State private var sharePreparationError: String?
+    @State private var showsSaveCompleted = false
 
     var body: some View {
         NavigationStack {
@@ -240,9 +243,15 @@ struct PDFShareSheetView: View {
             .sheet(isPresented: $isShareSheetPresented, onDismiss: {
                 isOpeningShareMenu = false
             }) {
-                PDFActivityViewController(url: exportedPDF.url) {
+                PDFActivityViewController(url: exportedPDF.url) { completed in
                     isOpeningShareMenu = false
+                    if completed {
+                        showsSaveCompleted = true
+                    }
                 }
+            }
+            .alert("保存が完了しました", isPresented: $showsSaveCompleted) {
+                Button("OK", role: .cancel) {}
             }
         }
     }
@@ -297,12 +306,14 @@ private enum PDFSharePreparationError: LocalizedError {
 
 private struct PDFActivityViewController: UIViewControllerRepresentable {
     let url: URL
-    let onReady: () -> Void
+    let onComplete: (Bool) -> Void
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let viewController = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        viewController.completionWithItemsHandler = { _, _, _, _ in
-            onReady()
+        viewController.completionWithItemsHandler = { _, completed, _, _ in
+            DispatchQueue.main.async {
+                onComplete(completed)
+            }
         }
         return viewController
     }

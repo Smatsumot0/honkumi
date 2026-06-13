@@ -31,9 +31,12 @@ final class DocumentStore: ObservableObject {
             needsInitialSave = false
         }
 
-        self.appData = loadedData
-        self.document = Self.activeDocument(in: loadedData)
-        if needsInitialSave {
+        var initialData = loadedData
+        initialData.subscriptionStatus = .free
+
+        self.appData = initialData
+        self.document = Self.activeDocument(in: initialData)
+        if needsInitialSave || initialData != loadedData {
             save()
         }
     }
@@ -68,6 +71,15 @@ final class DocumentStore: ObservableObject {
 
     var isPageNumberFontUnlocked: Bool {
         appData.subscriptionStatus == .paid
+    }
+
+    func setProUnlocked(_ isUnlocked: Bool) {
+        let status: SubscriptionStatus = isUnlocked ? .paid : .free
+        guard appData.subscriptionStatus != status else { return }
+
+        updateAppData { data in
+            data.subscriptionStatus = status
+        }
     }
 
     func works(in category: WorkCategory) -> [ManuscriptDocument] {

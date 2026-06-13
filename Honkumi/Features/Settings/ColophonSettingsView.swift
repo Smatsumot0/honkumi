@@ -10,9 +10,11 @@ struct ColophonSettingsView: View {
 
     @StateObject var viewModel: SettingsViewModel
     let mode: Mode
+    @ObservedObject var proStore: HonkumiProStore
 
     @State private var selectedCircleImageItem: PhotosPickerItem?
-    @State private var showsPaidFeatureAlert = false
+    @State private var isProPurchasePresented = false
+    @State private var presentedProFeature: HonkumiProFeature?
 
     var body: some View {
         Form {
@@ -23,11 +25,19 @@ struct ColophonSettingsView: View {
                 activeWorkColophonSection
             }
         }
+        .listSectionSpacing(.compact)
         .onChange(of: selectedCircleImageItem) { _, item in
             loadImageData(from: item, keyPath: \.circleImageData)
         }
-        .alert("有料機能です", isPresented: $showsPaidFeatureAlert) {
-            Button("OK", role: .cancel) {}
+        .sheet(isPresented: $isProPurchasePresented) {
+            HonkumiProPurchaseView(proStore: proStore, feature: presentedProFeature)
+        }
+        .alert(item: purchaseMessageBinding) { message in
+            Alert(
+                title: Text(message.title),
+                message: Text(message.body),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
 
@@ -55,17 +65,15 @@ struct ColophonSettingsView: View {
 
     private var colophonIdentityFields: some View {
         Group {
-            Toggle("発行者を表示", isOn: colophonBinding(\.showsPublisherName))
-            TextField("発行者", text: colophonBinding(\.publisherName))
-                .disabled(!viewModel.settings.colophon.showsPublisherName)
-
             Toggle("作者名を表示", isOn: colophonBinding(\.showsAuthorName))
-            TextField("作者名", text: colophonBinding(\.authorName))
-                .disabled(!viewModel.settings.colophon.showsAuthorName)
+            if viewModel.settings.colophon.showsAuthorName {
+                TextField("作者名", text: colophonBinding(\.authorName))
+            }
 
             Toggle("サークル名を表示", isOn: colophonBinding(\.showsCircleName))
-            TextField("サークル名", text: colophonBinding(\.circleName))
-                .disabled(!viewModel.settings.colophon.showsCircleName)
+            if viewModel.settings.colophon.showsCircleName {
+                TextField("サークル名", text: colophonBinding(\.circleName))
+            }
             circleLogoControls
 
             Toggle("URLを表示", isOn: colophonBinding(\.showsWebsiteURL))
@@ -93,7 +101,7 @@ struct ColophonSettingsView: View {
 
     @ViewBuilder
     private var circleLogoControls: some View {
-        let isPaid = viewModel.subscriptionStatus == .paid
+        let isPaid = proStore.isProUnlocked
 
         HStack {
             Toggle("サークルロゴを使用", isOn: circleImageUsageBinding)
@@ -113,7 +121,7 @@ struct ColophonSettingsView: View {
     private func circleLogoImportRow(isPaid: Bool) -> some View {
         let imageData = viewModel.settings.colophon.circleImageData
 
-        if viewModel.subscriptionStatus == .paid {
+        if isPaid {
             HStack {
                 imagePreview(data: imageData)
 
@@ -135,7 +143,7 @@ struct ColophonSettingsView: View {
             }
         } else {
             Button {
-                showsPaidFeatureAlert = true
+                presentProPurchase()
             } label: {
                 HStack {
                     Text("サークルロゴ画像をインポート")
@@ -171,8 +179,8 @@ struct ColophonSettingsView: View {
         Binding(
             get: { viewModel.settings.colophon.usesCircleImageForCreator },
             set: { newValue in
-                guard viewModel.subscriptionStatus == .paid else {
-                    showsPaidFeatureAlert = true
+                guard proStore.isProUnlocked else {
+                    presentProPurchase()
                     return
                 }
 
@@ -217,11 +225,24 @@ struct ColophonSettingsView: View {
     }
 
     private var paidFeatureBadge: some View {
-        Text("有料")
+        Label("有料", systemImage: "lock.fill")
+            .labelStyle(.titleAndIcon)
             .font(.caption2.weight(.bold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(Color.blue, in: Capsule())
+    }
+
+    private var purchaseMessageBinding: Binding<HonkumiProPurchaseMessage?> {
+        Binding(
+            get: { proStore.purchaseMessage },
+            set: { _ in proStore.clearPurchaseMessage() }
+        )
+    }
+
+    private func presentProPurchase() {
+        presentedProFeature = .circleLogo
+        isProPurchasePresented = true
     }
 }

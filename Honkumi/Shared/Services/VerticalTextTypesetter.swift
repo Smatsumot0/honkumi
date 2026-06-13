@@ -45,27 +45,41 @@ nonisolated struct VerticalGlyphAdjustment: Equatable {
     let yOffset: CGFloat
 }
 
+nonisolated enum VerticalCharacterKind: Equatable {
+    case japanese
+    case smallKana
+    case punctuation
+    case openingBracket
+    case closingBracket
+    case middleDot
+    case longVowel
+    case dash
+    case ellipsis
+    case alphanumeric
+}
+
 nonisolated enum VerticalGlyphMetrics {
     static let punctuation = VerticalGlyphAdjustment(
-        fontScale: 0.64,
-        xOffset: 0.10,
-        yOffset: -0.04
+        fontScale: 0.72,
+        xOffset: 0.43,
+        yOffset: -0.48
     )
-    static let punctuationAfterBaseYOffset: CGFloat = 0.30
-    static let punctuationOverflowYOffset: CGFloat = 0.30
+    static let punctuationAfterBaseYOffset: CGFloat = -0.32
+    static let punctuationOverflowYOffset: CGFloat = 0.06
 
     static let smallKana = VerticalGlyphAdjustment(
-        fontScale: 0.76,
+        fontScale: 0.84,
         xOffset: 0.06,
-        yOffset: -0.06
+        yOffset: -0.02
     )
 
     static let bracketFontScale: CGFloat = 0.88
+    static let doubleMinuteFontScale: CGFloat = 1
     static let narrowSymbolFontScale: CGFloat = 0.86
     static let ellipsisFontScale: CGFloat = 0.86
     static let sidewaysAlphanumericFontScale: CGFloat = 1
     static let tateChuYokoFontScale: CGFloat = 0.72
-    static let closingBracketAfterBaseOffset = CGPoint(x: -0.03, y: 0.30)
+    static let closingBracketAfterBaseOffset = CGPoint(x: -0.02, y: 0.20)
     static let stackedGlyphOverflowYOffset: CGFloat = -0.16
 
     static func centeredRunYOffset(cellSpan: Int) -> CGFloat {
@@ -74,6 +88,17 @@ nonisolated enum VerticalGlyphMetrics {
 }
 
 nonisolated enum VerticalTextTypesetter {
+    private static let horizontalRunStart = "\u{E000}"
+    private static let horizontalRunEnd = "\u{E001}"
+
+    static func horizontalRun(_ text: String) -> String {
+        horizontalRunStart + text + horizontalRunEnd
+    }
+
+    static func horizontalRunContent(_ text: String) -> String? {
+        markedHorizontalRunText(text)
+    }
+
     static func cells(
         from column: String,
         alphanumericOrientation: AlphanumericOrientation
@@ -99,7 +124,14 @@ nonisolated enum VerticalTextTypesetter {
         while index < characters.count {
             let character = characters[index]
 
-            if isEllipsis(character) {
+            if character == horizontalRunStart {
+                let run = markedHorizontalRun(in: characters, startingAt: index)
+                units.append(VerticalTextLayoutUnit(run.text, cellSpan: 1))
+                index = run.endIndex
+            } else if isDoubleQuote(character) {
+                units.append(VerticalTextLayoutUnit(doubleMinuteQuote(in: units)))
+                index += 1
+            } else if isEllipsis(character) {
                 let run = ellipsisRun(in: characters, startingAt: index)
                 for chunk in ellipsisChunks(from: run.text) {
                     units.append(VerticalTextLayoutUnit(chunk, cellSpan: chunk.count))
@@ -110,11 +142,14 @@ nonisolated enum VerticalTextTypesetter {
                       isExclamationQuestion(characters[index + 1]) {
                 units.append(VerticalTextLayoutUnit(character + characters[index + 1]))
                 index += 2
+            } else if isHalfWidthRunStart(character), alphanumericOrientation == .stacked {
+                units.append(VerticalTextLayoutUnit(character))
+                index += 1
             } else if isHalfWidthRunStart(character) {
                 let run = halfWidthRun(in: characters, startingAt: index)
                 units.append(VerticalTextLayoutUnit(
                     run.text,
-                    cellSpan: alphanumericCellSpan(for: run.text)
+                    cellSpan: alphanumericCellSpan(for: run.text, alphanumericOrientation: alphanumericOrientation)
                 ))
                 index = run.endIndex
             } else if isPunctuation(character),
@@ -140,6 +175,10 @@ nonisolated enum VerticalTextTypesetter {
     }
 
     private static func cellCharacters(for text: String) -> [String] {
+        if isMarkedHorizontalRun(text) {
+            return [text]
+        }
+
         if isExclamationQuestionPair(text)
             || isAlphanumericRun(text)
             || isEllipsisRun(text) {
@@ -167,6 +206,14 @@ nonisolated enum VerticalTextTypesetter {
         for character: String,
         alphanumericOrientation: AlphanumericOrientation
     ) -> VerticalGlyphLayout {
+        if let horizontalText = markedHorizontalRunText(character) {
+            return VerticalGlyphLayout(
+                horizontalText,
+                fontScale: VerticalGlyphMetrics.tateChuYokoFontScale,
+                disablesCharacterSpacing: true
+            )
+        }
+
         if isExclamationQuestionPair(character) {
             return VerticalGlyphLayout(
                 character,
@@ -175,15 +222,34 @@ nonisolated enum VerticalTextTypesetter {
             )
         }
 
-        if isAlphanumericRun(character) {
-            let reservedCellCount = sidewaysRunCellSpan(for: character)
+        if isDoubleQuote(character) {
             return VerticalGlyphLayout(
-                character,
+                "〝",
                 rotationDegrees: 90,
-                fontScale: VerticalGlyphMetrics.sidewaysAlphanumericFontScale,
-                yOffset: VerticalGlyphMetrics.centeredRunYOffset(cellSpan: reservedCellCount),
-                disablesCharacterSpacing: true
+                fontScale: VerticalGlyphMetrics.doubleMinuteFontScale
             )
+        }
+
+        if isAlphanumericRun(character) {
+            switch alphanumericOrientation {
+            case .stacked:
+                return VerticalGlyphLayout(character)
+            case .tateChuYoko where isCompactTateChuYokoRun(character):
+                return VerticalGlyphLayout(
+                    character,
+                    fontScale: VerticalGlyphMetrics.tateChuYokoFontScale,
+                    disablesCharacterSpacing: true
+                )
+            case .tateChuYoko, .sideways:
+                let reservedCellCount = sidewaysRunCellSpan(for: character)
+                return VerticalGlyphLayout(
+                    character,
+                    rotationDegrees: 90,
+                    fontScale: VerticalGlyphMetrics.sidewaysAlphanumericFontScale,
+                    yOffset: VerticalGlyphMetrics.centeredRunYOffset(cellSpan: reservedCellCount),
+                    disablesCharacterSpacing: true
+                )
+            }
         }
 
         if isEllipsisRun(character) {
@@ -205,6 +271,18 @@ nonisolated enum VerticalTextTypesetter {
             VerticalGlyphLayout("﹃", fontScale: VerticalGlyphMetrics.bracketFontScale)
         case "』":
             VerticalGlyphLayout("﹄", fontScale: VerticalGlyphMetrics.bracketFontScale)
+        case "“", "〝":
+            VerticalGlyphLayout(
+                "〝",
+                rotationDegrees: 90,
+                fontScale: VerticalGlyphMetrics.doubleMinuteFontScale
+            )
+        case "”", "〟", "〞":
+            VerticalGlyphLayout(
+                "〟",
+                rotationDegrees: 90,
+                fontScale: VerticalGlyphMetrics.doubleMinuteFontScale
+            )
         case "（", "(":
             VerticalGlyphLayout("︵", fontScale: VerticalGlyphMetrics.bracketFontScale)
         case "）", ")":
@@ -315,6 +393,43 @@ nonisolated enum VerticalTextTypesetter {
         dashConnectorCharacters.contains(character)
     }
 
+    static func needsVisualCentering(_ character: String) -> Bool {
+        if isEllipsisRun(character) {
+            return true
+        }
+
+        guard character.count == 1 else { return false }
+        return longVowelCharacters.contains(character)
+            || dashConnectorCharacters.contains(character)
+            || ellipsisCharacters.contains(character)
+    }
+
+    static func characterKind(for text: String) -> VerticalCharacterKind {
+        if isMarkedHorizontalRun(text) || isAlphanumericRun(text) {
+            return .alphanumeric
+        }
+        if isEllipsisRun(text) {
+            return .ellipsis
+        }
+        guard text.count == 1 else { return .japanese }
+        if isSmallKana(text) { return .smallKana }
+        if isPunctuation(text) { return .punctuation }
+        if openingBracketCharacters.contains(text) { return .openingBracket }
+        if closingQuoteCharacters.contains(text) { return .closingBracket }
+        if middleDotCharacters.contains(text) { return .middleDot }
+        if longVowelCharacters.contains(text) { return .longVowel }
+        if dashConnectorCharacters.contains(text) { return .dash }
+        return .japanese
+    }
+
+    static func isExclamationQuestionPair(_ text: String) -> Bool {
+        text.count == 2 && text.map(String.init).allSatisfy(isExclamationQuestion)
+    }
+
+    static func isExclamationQuestionCluster(_ text: String) -> Bool {
+        !text.isEmpty && text.map(String.init).allSatisfy(isExclamationQuestion)
+    }
+
     static func isAlphanumericRun(_ text: String) -> Bool {
         !text.isEmpty
             && text.unicodeScalars.contains(where: { $0.value != 0x20 })
@@ -356,10 +471,6 @@ nonisolated enum VerticalTextTypesetter {
         exclamationQuestionCharacters.contains(character)
     }
 
-    private static func isExclamationQuestionPair(_ text: String) -> Bool {
-        text.count == 2 && text.map(String.init).allSatisfy(isExclamationQuestion)
-    }
-
     private static func isEllipsisRun(_ text: String) -> Bool {
         !text.isEmpty && text.map(String.init).allSatisfy(isEllipsis)
     }
@@ -399,6 +510,36 @@ nonisolated enum VerticalTextTypesetter {
         return (run, cursor)
     }
 
+    private static func doubleMinuteQuote(in units: [VerticalTextLayoutUnit]) -> String {
+        let doubleMinuteQuoteCount = units.reduce(0) { partialResult, unit in
+            partialResult + unit.text.map(String.init).filter { $0 == "〝" || $0 == "〟" }.count
+        }
+        return doubleMinuteQuoteCount.isMultiple(of: 2) ? "〝" : "〟"
+    }
+
+    private static func isDoubleQuote(_ character: String) -> Bool {
+        character == "\"" || character == "＂"
+    }
+
+    private static func markedHorizontalRun(
+        in characters: [String],
+        startingAt index: Int
+    ) -> (text: String, endIndex: Int) {
+        var run = horizontalRunStart
+        var cursor = index + 1
+
+        while cursor < characters.count {
+            let character = characters[cursor]
+            run += character
+            cursor += 1
+            if character == horizontalRunEnd {
+                return (run, cursor)
+            }
+        }
+
+        return (characters[index], index + 1)
+    }
+
     private static func ellipsisChunks(from run: String) -> [String] {
         let characters = run.map(String.init)
         var chunks: [String] = []
@@ -413,8 +554,25 @@ nonisolated enum VerticalTextTypesetter {
         return chunks
     }
 
-    private static func alphanumericCellSpan(for text: String) -> Int {
-        sidewaysRunCellSpan(for: text)
+    private static func alphanumericCellSpan(
+        for text: String,
+        alphanumericOrientation: AlphanumericOrientation
+    ) -> Int {
+        if alphanumericOrientation == .tateChuYoko, isCompactTateChuYokoRun(text) {
+            return 1
+        }
+
+        return sidewaysRunCellSpan(for: text)
+    }
+
+    private static func isCompactTateChuYokoRun(_ text: String) -> Bool {
+        let scalars = text.unicodeScalars.filter { $0.value != 0x20 }
+        guard (1...3).contains(scalars.count) else { return false }
+        return scalars.allSatisfy { scalar in
+            (0x30...0x39).contains(scalar.value)
+                || (0x41...0x5A).contains(scalar.value)
+                || (0x61...0x7A).contains(scalar.value)
+        }
     }
 
     private static func sidewaysRunCellSpan(for text: String) -> Int {
@@ -446,14 +604,16 @@ nonisolated enum VerticalTextTypesetter {
     }
 
     private static func isHalfWidthRunStart(_ character: String) -> Bool {
-        character.unicodeScalars.count == 1
+        guard !isDoubleQuote(character) else { return false }
+        return character.unicodeScalars.count == 1
             && character.unicodeScalars.allSatisfy { scalar in
                 scalar.value >= 0x21 && scalar.value <= 0x7E
             }
     }
 
     private static func isHalfWidthRunCharacter(_ character: String) -> Bool {
-        character.unicodeScalars.count == 1
+        guard !isDoubleQuote(character) else { return false }
+        return character.unicodeScalars.count == 1
             && character.unicodeScalars.allSatisfy(isHalfWidthRunScalar)
     }
 
@@ -465,12 +625,39 @@ nonisolated enum VerticalTextTypesetter {
         ellipsisCharacters.contains(character)
     }
 
+    private static func isMarkedHorizontalRun(_ text: String) -> Bool {
+        markedHorizontalRunText(text) != nil
+    }
+
+    private static func markedHorizontalRunText(_ text: String) -> String? {
+        guard text.hasPrefix(horizontalRunStart), text.hasSuffix(horizontalRunEnd) else {
+            return nil
+        }
+
+        let start = text.index(after: text.startIndex)
+        let end = text.index(before: text.endIndex)
+        guard start <= end else { return "" }
+        return String(text[start..<end])
+    }
+
     private static let punctuationCharacters: Set<String> = [
         "、", "。", "､", "｡", "，", "．", "︑", "︒", "︐"
     ]
 
     private static let closingQuoteCharacters: Set<String> = [
-        "」", "』", "）", "】", "〉", "》", "］", "｝"
+        "」", "』", "”", "〟", "〞", "）", "】", "〉", "》", "］", "｝"
+    ]
+
+    private static let openingBracketCharacters: Set<String> = [
+        "「", "『", "“", "〝", "（", "【", "〈", "《", "［", "｛"
+    ]
+
+    private static let middleDotCharacters: Set<String> = [
+        "・", "･"
+    ]
+
+    private static let longVowelCharacters: Set<String> = [
+        "ー"
     ]
 
     private static let smallKanaCharacters: Set<String> = [
@@ -499,14 +686,14 @@ nonisolated enum VerticalTextTypesetter {
     private static let lineStartProhibitedCharacters: Set<String> = [
         "、", "。", "，", "．", "︑", "︒", "︐", "・", "：", "；",
         "！", "？", "!", "?",
-        "」", "』", "）", "】", "》", "〉", "］", "｝",
+        "」", "』", "”", "〟", "〞", "）", "】", "》", "〉", "］", "｝",
         "ぁ", "ぃ", "ぅ", "ぇ", "ぉ", "っ", "ゃ", "ゅ", "ょ", "ゎ",
         "ァ", "ィ", "ゥ", "ェ", "ォ", "ッ", "ャ", "ュ", "ョ", "ヮ", "ヵ", "ヶ",
         "ー", "─", "━", "―", "—", "々", "ゝ", "ゞ"
     ]
 
     private static let lineEndProhibitedCharacters: Set<String> = [
-        "「", "『", "（", "【", "《", "〈", "［", "｛"
+        "「", "『", "“", "〝", "（", "【", "《", "〈", "［", "｛"
     ]
 
     private static let nonBreakingPairs: Set<String> = [

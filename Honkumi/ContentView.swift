@@ -2,8 +2,10 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var documentStore: DocumentStore
+    @ObservedObject var proStore: HonkumiProStore
     @State private var showsWorkspace = false
     @State private var presentedSettingsScope: SettingsViewModel.Scope?
+    @State private var presentedSettingsInitialTab: SettingsInitialTab = .editor
     @State private var presentedColophonScope: SettingsViewModel.Scope?
 
     var body: some View {
@@ -14,6 +16,7 @@ struct ContentView: View {
                     showsWorkspace = true
                 },
                 onShowDefaultSettings: {
+                    presentedSettingsInitialTab = .editor
                     presentedSettingsScope = .userDefault
                 },
                 onShowDefaultColophonSettings: {
@@ -23,13 +26,19 @@ struct ContentView: View {
             .navigationDestination(isPresented: $showsWorkspace) {
                 WorkspaceView(
                     documentStore: documentStore,
-                    presentedSettingsScope: $presentedSettingsScope
+                    proStore: proStore,
+                    presentedSettingsScope: $presentedSettingsScope,
+                    presentedSettingsInitialTab: $presentedSettingsInitialTab
                 )
             }
         }
         .sheet(item: $presentedSettingsScope) { scope in
             NavigationStack {
-                SettingsView(viewModel: SettingsViewModel(documentStore: documentStore, scope: scope))
+                SettingsView(
+                    viewModel: SettingsViewModel(documentStore: documentStore, scope: scope),
+                    proStore: proStore,
+                    initialTab: presentedSettingsInitialTab
+                )
                     .navigationTitle(scope.title)
                     .navigationBarTitleDisplayMode(.inline)
             }
@@ -38,28 +47,34 @@ struct ContentView: View {
             NavigationStack {
                 ColophonSettingsView(
                     viewModel: SettingsViewModel(documentStore: documentStore, scope: scope),
-                    mode: scope.colophonMode
+                    mode: scope.colophonMode,
+                    proStore: proStore
                 )
                 .navigationTitle(scope.colophonTitle)
                 .navigationBarTitleDisplayMode(.inline)
             }
+        }
+        .task {
+            proStore.start()
+            await proStore.refreshPurchasedStatus()
+            documentStore.setProUnlocked(proStore.isProUnlocked)
+        }
+        .onChange(of: proStore.isProUnlocked) { _, isUnlocked in
+            documentStore.setProUnlocked(isUnlocked)
         }
     }
 }
 
 private struct WorkspaceView: View {
     @ObservedObject var documentStore: DocumentStore
+    @ObservedObject var proStore: HonkumiProStore
     @Binding var presentedSettingsScope: SettingsViewModel.Scope?
+    @Binding var presentedSettingsInitialTab: SettingsInitialTab
     @StateObject private var editorViewModel: EditorViewModel
     @StateObject private var previewViewModel: PreviewViewModel
     @State private var selectedSection: AppSection = .editor
     @State private var editorScrollOffset: CGPoint = .zero
-    @State private var previewPageScale: CGFloat = 1
-    @State private var previewFocusedPage = 1
-    @State private var previewHorizontalAnchor: CGFloat = 0.5
-    @State private var previewScrollOffset: CGPoint = .zero
-    @State private var showsFacingPagesPreview = true
-    @State private var showsPreviewGuides = true
+    @State private var isEditorChromeVisible = true
     @State private var preflightResult: PreflightResult?
     @State private var exportedPDF: ExportedPDF?
     @State private var exportErrorMessage = ""
@@ -68,37 +83,27 @@ private struct WorkspaceView: View {
 
     private let preflightService = PDFPreflightService()
     private let pdfExportService = PDFExportService()
+    private let pdfExportAdService = PDFExportAdService()
 
-    init(documentStore: DocumentStore, presentedSettingsScope: Binding<SettingsViewModel.Scope?>) {
+    init(
+        documentStore: DocumentStore,
+        proStore: HonkumiProStore,
+        presentedSettingsScope: Binding<SettingsViewModel.Scope?>,
+        presentedSettingsInitialTab: Binding<SettingsInitialTab>
+    ) {
         self.documentStore = documentStore
+        self.proStore = proStore
         self._presentedSettingsScope = presentedSettingsScope
+        self._presentedSettingsInitialTab = presentedSettingsInitialTab
         self._editorViewModel = StateObject(wrappedValue: EditorViewModel(documentStore: documentStore))
         self._previewViewModel = StateObject(wrappedValue: PreviewViewModel(documentStore: documentStore))
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            sectionTabs
-
-            if selectedSection == .preview {
-                HStack {
-                    Button {
-                        showsPreviewGuides.toggle()
-                    } label: {
-                        Image(systemName: showsPreviewGuides ? "ruler.fill" : "ruler")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 30, height: 28)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(showsPreviewGuides ? .accentColor : nil)
-                    .accessibilityLabel(showsPreviewGuides ? "ガイドを非表示" : "ガイドを表示")
-
-                    Spacer()
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 10)
-                .background(.bar)
+            if selectedSection != .editor || isEditorChromeVisible {
+                sectionTabs
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             Group {
@@ -106,19 +111,16 @@ private struct WorkspaceView: View {
                 case .editor:
                     EditorView(
                         viewModel: editorViewModel,
-                        scrollOffset: $editorScrollOffset
+                        scrollOffset: $editorScrollOffset,
+                        isEditorChromeVisible: $isEditorChromeVisible
                     )
                 case .preview:
                     ZStack {
-                        PreviewView(
-                            viewModel: previewViewModel,
-                            pageScale: $previewPageScale,
-                            focusedPage: $previewFocusedPage,
-                            horizontalAnchor: $previewHorizontalAnchor,
-                            scrollOffset: $previewScrollOffset,
-                            showsFacingPages: $showsFacingPagesPreview,
-                            showsGuides: $showsPreviewGuides
-                        )
+                        PreviewView(viewModel: previewViewModel, displayMode: .single)
+                    }
+                case .spreadPreview:
+                    ZStack {
+                        PreviewView(viewModel: previewViewModel, displayMode: .spread)
                     }
                 }
             }
@@ -127,7 +129,7 @@ private struct WorkspaceView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if selectedSection == .preview {
+                if selectedSection.isPreview {
                     Button {
                         runPreflightBeforeExport()
                     } label: {
@@ -142,6 +144,7 @@ private struct WorkspaceView: View {
                 }
 
                 Button {
+                    presentedSettingsInitialTab = selectedSection.isPreview ? .print : .editor
                     presentedSettingsScope = .activeWork
                 } label: {
                     Image(systemName: "gearshape")
@@ -176,11 +179,16 @@ private struct WorkspaceView: View {
             Text(exportErrorMessage)
         }
         .onAppear {
-            previewViewModel.setPreviewActive(selectedSection == .preview)
+            updatePreviewActivity(for: selectedSection)
+        }
+        .onDisappear {
+            previewViewModel.setPreviewActive(false)
         }
         .onChange(of: selectedSection) { _, section in
-            previewViewModel.setPreviewActive(section == .preview)
+            isEditorChromeVisible = true
+            updatePreviewActivity(for: section)
         }
+        .animation(.easeInOut(duration: 0.18), value: isEditorChromeVisible)
     }
 
     private var sectionTabs: some View {
@@ -193,7 +201,7 @@ private struct WorkspaceView: View {
                     Text(section.title)
                         .font(.caption.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .frame(height: 30)
+                        .frame(height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -207,8 +215,8 @@ private struct WorkspaceView: View {
         }
         .padding(2)
         .background(Color(.tertiarySystemFill), in: Capsule(style: .continuous))
-        .padding(.horizontal)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
         .background(.bar)
     }
 
@@ -237,6 +245,15 @@ private struct WorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func updatePreviewActivity(for section: AppSection) {
+        guard let previewKind = section.previewKind else {
+            previewViewModel.setPreviewActive(false)
+            return
+        }
+
+        previewViewModel.setPreviewActive(true, kind: previewKind)
     }
 
     private func autoFixAndContinue() {
@@ -271,6 +288,7 @@ private struct WorkspaceView: View {
 
         Task {
             do {
+                await pdfExportAdService.presentAdIfNeeded(subscriptionStatus: subscriptionStatus)
                 let url = try await pdfExportService.export(
                     document: exportDocument,
                     subscriptionStatus: subscriptionStatus
@@ -298,6 +316,7 @@ private struct WorkspaceView: View {
 private enum AppSection: String, CaseIterable, Identifiable {
     case editor
     case preview
+    case spreadPreview
 
     var id: String { rawValue }
 
@@ -307,6 +326,8 @@ private enum AppSection: String, CaseIterable, Identifiable {
             "編集"
         case .preview:
             "プレビュー"
+        case .spreadPreview:
+            "見開きプレビュー"
         }
     }
 
@@ -316,6 +337,23 @@ private enum AppSection: String, CaseIterable, Identifiable {
             "square.and.pencil"
         case .preview:
             "doc.text.magnifyingglass"
+        case .spreadPreview:
+            "book.pages"
+        }
+    }
+
+    var isPreview: Bool {
+        previewKind != nil
+    }
+
+    var previewKind: PreviewPDFKind? {
+        switch self {
+        case .editor:
+            nil
+        case .preview:
+            .normal
+        case .spreadPreview:
+            .spread
         }
     }
 }

@@ -10,6 +10,10 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>ja</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
@@ -39,15 +43,10 @@
 		<string>GreatVibes-Regular.ttf</string>
 		<string>HachiMaruPop-Regular.ttf</string>
 		<string>HomemadeApple-Regular.ttf</string>
-		<string>IBMPlexSansJP-Regular.ttf</string>
 		<string>LoveLight-Regular.ttf</string>
 		<string>MPLUS1-Regular.ttf</string>
-		<string>NotoSansJP-Regular.otf</string>
-		<string>NotoSerifJP-Regular.otf</string>
 		<string>Pacifico-Regular.ttf</string>
 		<string>ShipporiMincho-Regular.ttf</string>
-		<string>SourceHanSansJP-Regular.otf</string>
-		<string>SourceHanSerifJP-Regular.otf</string>
 		<string>ZenOldMincho-Regular.ttf</string>
 	</array>
 	<key>UILaunchStoryboardName</key>

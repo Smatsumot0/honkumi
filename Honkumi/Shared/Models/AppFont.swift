@@ -62,10 +62,137 @@ nonisolated struct PageNumberFont: Identifiable, Equatable {
     let category: PageNumberFontCategory
     let licenseName: String
     let copyrightText: String
+
+    /// Multiplier for UI previews. PDF output uses explicit point-size adjustments below.
+    let sizeMultiplier: CGFloat
+    let usesDotLeaderInTableOfContents: Bool
+
+    init(
+        id: String,
+        displayName: String,
+        postScriptName: String,
+        fileName: String,
+        category: PageNumberFontCategory,
+        licenseName: String,
+        copyrightText: String,
+        sizeMultiplier: CGFloat = 1,
+        usesDotLeaderInTableOfContents: Bool = false
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.postScriptName = postScriptName
+        self.fileName = fileName
+        self.category = category
+        self.licenseName = licenseName
+        self.copyrightText = copyrightText
+        self.sizeMultiplier = sizeMultiplier
+        self.usesDotLeaderInTableOfContents = usesDotLeaderInTableOfContents
+    }
+}
+
+nonisolated struct PDFBodyFontSizeAdjustment: Equatable {
+    let tableOfContentsDelta: CGFloat
+    let pageNumberDelta: CGFloat
+    let exclamationQuestionDelta: CGFloat
+    let longVowelDelta: CGFloat
+    let longVowelYOffset: CGFloat
+
+    init(
+        tableOfContentsDelta: CGFloat = 0,
+        pageNumberDelta: CGFloat = 0,
+        exclamationQuestionDelta: CGFloat = 0,
+        longVowelDelta: CGFloat = 0,
+        longVowelYOffset: CGFloat = 0
+    ) {
+        self.tableOfContentsDelta = tableOfContentsDelta
+        self.pageNumberDelta = pageNumberDelta
+        self.exclamationQuestionDelta = exclamationQuestionDelta
+        self.longVowelDelta = longVowelDelta
+        self.longVowelYOffset = longVowelYOffset
+    }
+}
+
+nonisolated struct PDFPageNumberFontSizeAdjustment: Equatable {
+    let tableOfContentsDelta: CGFloat
+    let pageNumberDelta: CGFloat
+
+    init(
+        tableOfContentsDelta: CGFloat = 0,
+        pageNumberDelta: CGFloat = 0
+    ) {
+        self.tableOfContentsDelta = tableOfContentsDelta
+        self.pageNumberDelta = pageNumberDelta
+    }
 }
 
 nonisolated enum AppFontCatalog {
     static let defaultFontId = "biz-ud-mincho"
+    private static let gothicFallbackFontId = "biz-ud-gothic"
+    private static let legacyFontReplacements: [String: String] = [
+        "source-han-serif-jp": defaultFontId,
+        "noto-serif-jp": defaultFontId,
+        "source-han-sans-jp": gothicFallbackFontId,
+        "noto-sans-jp": gothicFallbackFontId,
+        "ibm-plex-sans-jp": gothicFallbackFontId
+    ]
+    private static let bodyPDFFontSizeAdjustments: [String: PDFBodyFontSizeAdjustment] = [
+        defaultFontId: PDFBodyFontSizeAdjustment(
+            tableOfContentsDelta: 3,
+            pageNumberDelta: -1,
+            exclamationQuestionDelta: 1
+        ),
+        "biz-ud-gothic": PDFBodyFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -1
+        ),
+        "m-plus-1": PDFBodyFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -1,
+            exclamationQuestionDelta: 1
+        ),
+        "zen-old-mincho": PDFBodyFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -1,
+            longVowelYOffset: 72 / 25.4
+        ),
+        "shippori-mincho": PDFBodyFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -1
+        )
+    ]
+    private static let pageNumberPDFFontSizeAdjustments: [String: PDFPageNumberFontSizeAdjustment] = [
+        "caveat": PDFPageNumberFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -1
+        ),
+        "cherry-bomb-one": PDFPageNumberFontSizeAdjustment(
+            tableOfContentsDelta: 1,
+            pageNumberDelta: -4
+        ),
+        "dancing-script": PDFPageNumberFontSizeAdjustment(
+            pageNumberDelta: -4
+        ),
+        "great-vibes": PDFPageNumberFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -2
+        ),
+        "hachi-maru-pop": PDFPageNumberFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -3
+        ),
+        "homemade-apple": PDFPageNumberFontSizeAdjustment(
+            tableOfContentsDelta: 4,
+            pageNumberDelta: -2
+        ),
+        "love-light": PDFPageNumberFontSizeAdjustment(
+            tableOfContentsDelta: 2,
+            pageNumberDelta: -2
+        ),
+        "pacifico": PDFPageNumberFontSizeAdjustment(
+            tableOfContentsDelta: 3,
+            pageNumberDelta: -2
+        )
+    ]
 
     static let all: [AppFont] = [
         AppFont(
@@ -87,46 +214,6 @@ nonisolated enum AppFontCatalog {
             category: .standard,
             licenseName: "SIL Open Font License 1.1",
             copyrightText: "Copyright 2022 The BIZ UDGothic Project Authors."
-        ),
-        AppFont(
-            id: "source-han-serif-jp",
-            displayName: "源ノ明朝",
-            postScriptName: "SourceHanSerifJP-Regular",
-            fileName: "SourceHanSerifJP-Regular.otf",
-            isPremium: false,
-            category: .novel,
-            licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2017 Adobe."
-        ),
-        AppFont(
-            id: "source-han-sans-jp",
-            displayName: "源ノ角ゴシック",
-            postScriptName: "SourceHanSansJP-Regular",
-            fileName: "SourceHanSansJP-Regular.otf",
-            isPremium: false,
-            category: .proofreading,
-            licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2014-2021 Adobe."
-        ),
-        AppFont(
-            id: "noto-serif-jp",
-            displayName: "Noto Serif JP",
-            postScriptName: "NotoSerifJP-Regular",
-            fileName: "NotoSerifJP-Regular.otf",
-            isPremium: false,
-            category: .novel,
-            licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2017 The Noto Project Authors."
-        ),
-        AppFont(
-            id: "noto-sans-jp",
-            displayName: "Noto Sans JP",
-            postScriptName: "NotoSansJP-Regular",
-            fileName: "NotoSansJP-Regular.otf",
-            isPremium: false,
-            category: .proofreading,
-            licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2014-2021 The Noto Project Authors."
         ),
         AppFont(
             id: "shippori-mincho",
@@ -157,16 +244,6 @@ nonisolated enum AppFontCatalog {
             category: .proofreading,
             licenseName: "SIL Open Font License 1.1",
             copyrightText: "Copyright 2016 The M PLUS Project Authors."
-        ),
-        AppFont(
-            id: "ibm-plex-sans-jp",
-            displayName: "IBM Plex Sans JP",
-            postScriptName: "IBMPlexSansJP-Regular",
-            fileName: "IBMPlexSansJP-Regular.ttf",
-            isPremium: false,
-            category: .proofreading,
-            licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2017 IBM Corp."
         )
     ]
 
@@ -196,7 +273,9 @@ nonisolated enum AppFontCatalog {
             fileName: "Pacifico-Regular.ttf",
             category: .script,
             licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2018 The Pacifico Project Authors (https://github.com/googlefonts/Pacifico)"
+            copyrightText: "Copyright 2018 The Pacifico Project Authors (https://github.com/googlefonts/Pacifico)",
+            sizeMultiplier: 0.88,
+            usesDotLeaderInTableOfContents: true
         ),
         PageNumberFont(
             id: "great-vibes",
@@ -232,7 +311,9 @@ nonisolated enum AppFontCatalog {
             fileName: "HachiMaruPop-Regular.ttf",
             category: .handwriting,
             licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2020 The Hachi Maru Pop Project Authors (https://github.com/noriokanisawa/HachiMaruPop)"
+            copyrightText: "Copyright 2020 The Hachi Maru Pop Project Authors (https://github.com/noriokanisawa/HachiMaruPop)",
+            sizeMultiplier: 0.92,
+            usesDotLeaderInTableOfContents: true
         ),
         PageNumberFont(
             id: "cherry-bomb-one",
@@ -241,14 +322,25 @@ nonisolated enum AppFontCatalog {
             fileName: "CherryBombOne-Regular.ttf",
             category: .pop,
             licenseName: "SIL Open Font License 1.1",
-            copyrightText: "Copyright 2019 The Cherry Bomb Project Authors (https://github.com/satsuyako/CherryBomb)"
+            copyrightText: "Copyright 2019 The Cherry Bomb Project Authors (https://github.com/satsuyako/CherryBomb)",
+            sizeMultiplier: 0.86,
+            usesDotLeaderInTableOfContents: true
         )
     ]
 
     private static var registeredFontFiles = Set<String>()
+    private static let uiFontCache = NSCache<NSString, UIFont>()
 
     static func font(id: String) -> AppFont? {
-        all.first { $0.id == id }
+        all.first { $0.id == normalizedFontId(id) }
+    }
+
+    static func normalizedFontId(_ id: String) -> String {
+        let normalized = legacyFontReplacements[id] ?? id
+        guard all.contains(where: { $0.id == normalized }) else {
+            return defaultFontId
+        }
+        return normalized
     }
 
     static func fonts(in category: AppFontCategory) -> [AppFont] {
@@ -264,11 +356,156 @@ nonisolated enum AppFontCatalog {
         return pageNumberFonts.first { $0.id == id }
     }
 
+    static func usesDotLeaderInTableOfContents(pageNumberFontId: String?) -> Bool {
+        pageNumberFont(id: pageNumberFontId)?.usesDotLeaderInTableOfContents == true
+    }
+
+    static func bodyPDFFontSizeAdjustment(selectedFontId: String) -> PDFBodyFontSizeAdjustment {
+        bodyPDFFontSizeAdjustments[normalizedFontId(selectedFontId)] ?? PDFBodyFontSizeAdjustment()
+    }
+
+    static func pageNumberPDFFontSizeAdjustment(pageNumberFontId: String?) -> PDFPageNumberFontSizeAdjustment {
+        guard let pageNumberFont = pageNumberFont(id: pageNumberFontId) else {
+            return PDFPageNumberFontSizeAdjustment()
+        }
+
+        return pageNumberPDFFontSizeAdjustments[pageNumberFont.id] ?? PDFPageNumberFontSizeAdjustment()
+    }
+
+    static func pdfTableOfContentsBodyFontSize(
+        selectedFontId: String,
+        baseSize: CGFloat
+    ) -> CGFloat {
+        let adjustment = bodyPDFFontSizeAdjustment(selectedFontId: selectedFontId)
+        return max(baseSize + adjustment.tableOfContentsDelta, 1)
+    }
+
+    static func pdfVerticalGlyphFontSize(
+        selectedFontId: String,
+        baseSize: CGFloat,
+        glyphScale: CGFloat,
+        sourceCharacter: String,
+        appliesBodyGlyphAdjustment: Bool
+    ) -> CGFloat {
+        let scaledSize = baseSize * glyphScale
+        guard appliesBodyGlyphAdjustment else {
+            return max(scaledSize, 1)
+        }
+
+        let adjustment = bodyPDFFontSizeAdjustment(selectedFontId: selectedFontId)
+        let delta: CGFloat
+        if VerticalTextTypesetter.isExclamationQuestionCluster(sourceCharacter) {
+            delta = adjustment.exclamationQuestionDelta
+        } else if VerticalTextTypesetter.characterKind(for: sourceCharacter) == .longVowel {
+            delta = adjustment.longVowelDelta
+        } else {
+            delta = 0
+        }
+
+        return max(scaledSize + delta, 1)
+    }
+
+    static func pdfVerticalGlyphPositionOffset(
+        selectedFontId: String,
+        sourceCharacter: String,
+        appliesBodyGlyphAdjustment: Bool
+    ) -> CGSize {
+        guard appliesBodyGlyphAdjustment,
+              VerticalTextTypesetter.characterKind(for: sourceCharacter) == .longVowel else {
+            return .zero
+        }
+
+        let adjustment = bodyPDFFontSizeAdjustment(selectedFontId: selectedFontId)
+        return CGSize(width: 0, height: adjustment.longVowelYOffset)
+    }
+
+    static func pdfPageNumberFontSize(
+        pageNumberFontId: String?,
+        bodyFontId: String,
+        baseSize: CGFloat,
+        isPageNumberFontUnlocked: Bool
+    ) -> CGFloat {
+        let delta = if isPageNumberFontUnlocked, pageNumberFont(id: pageNumberFontId) != nil {
+            pageNumberPDFFontSizeAdjustment(pageNumberFontId: pageNumberFontId).pageNumberDelta
+        } else {
+            bodyPDFFontSizeAdjustment(selectedFontId: bodyFontId).pageNumberDelta
+        }
+        return max(baseSize + delta, 6)
+    }
+
+    static func pdfTableOfContentsPageNumberFontSize(
+        pageNumberFontId: String?,
+        bodyFontId: String,
+        baseSize: CGFloat,
+        glyphScale: CGFloat,
+        isPageNumberFontUnlocked: Bool
+    ) -> CGFloat {
+        let scaledSize = baseSize * glyphScale
+        let delta = if isPageNumberFontUnlocked, pageNumberFont(id: pageNumberFontId) != nil {
+            pageNumberPDFFontSizeAdjustment(pageNumberFontId: pageNumberFontId).tableOfContentsDelta
+        } else {
+            bodyPDFFontSizeAdjustment(selectedFontId: bodyFontId).tableOfContentsDelta
+        }
+        return max(scaledSize + delta, 1)
+    }
+
+    static func pdfPageNumberUIFont(
+        pageNumberFontId: String?,
+        bodyFontId: String,
+        size: CGFloat,
+        isPageNumberFontUnlocked: Bool
+    ) -> UIFont {
+        let adjustedSize = pdfPageNumberFontSize(
+            pageNumberFontId: pageNumberFontId,
+            bodyFontId: bodyFontId,
+            baseSize: size,
+            isPageNumberFontUnlocked: isPageNumberFontUnlocked
+        )
+        guard isPageNumberFontUnlocked,
+              let pageNumberFont = pageNumberFont(id: pageNumberFontId),
+              let uiFont = cachedUIFont(name: pageNumberFont.postScriptName, size: adjustedSize) else {
+            return uiFont(
+                selectedFontId: bodyFontId,
+                size: adjustedSize,
+                isAdditionalFontPackUnlocked: true
+            )
+        }
+
+        return uiFont
+    }
+
+    static func pdfTableOfContentsPageNumberUIFont(
+        pageNumberFontId: String?,
+        bodyFontId: String,
+        bodyFontSize: CGFloat,
+        glyphScale: CGFloat,
+        isPageNumberFontUnlocked: Bool
+    ) -> UIFont {
+        let adjustedSize = pdfTableOfContentsPageNumberFontSize(
+            pageNumberFontId: pageNumberFontId,
+            bodyFontId: bodyFontId,
+            baseSize: bodyFontSize,
+            glyphScale: glyphScale,
+            isPageNumberFontUnlocked: isPageNumberFontUnlocked
+        )
+        guard isPageNumberFontUnlocked,
+              let pageNumberFont = pageNumberFont(id: pageNumberFontId),
+              let uiFont = cachedUIFont(name: pageNumberFont.postScriptName, size: adjustedSize) else {
+            return uiFont(
+                selectedFontId: bodyFontId,
+                size: adjustedSize,
+                isAdditionalFontPackUnlocked: true
+            )
+        }
+
+        return uiFont
+    }
+
     static func effectiveFont(
         selectedFontId: String,
         isAdditionalFontPackUnlocked: Bool
     ) -> AppFont {
-        guard let selected = font(id: selectedFontId),
+        guard let selected = font(id: normalizedFontId(selectedFontId)),
               canLoad(selected) else {
             return fallbackFont()
         }
@@ -286,12 +523,12 @@ nonisolated enum AppFontCatalog {
         )
 
         if let postScriptName = font.postScriptName,
-           let uiFont = UIFont(name: postScriptName, size: size) {
+           let uiFont = cachedUIFont(name: postScriptName, size: size) {
             return uiFont
         }
 
         if let fallbackPostScriptName = fallbackFont().postScriptName,
-           let uiFont = UIFont(name: fallbackPostScriptName, size: size) {
+           let uiFont = cachedUIFont(name: fallbackPostScriptName, size: size) {
             return uiFont
         }
 
@@ -329,7 +566,10 @@ nonisolated enum AppFontCatalog {
     ) -> UIFont {
         guard isPageNumberFontUnlocked,
               let pageNumberFont = pageNumberFont(id: pageNumberFontId),
-              let uiFont = UIFont(name: pageNumberFont.postScriptName, size: size) else {
+              let uiFont = cachedUIFont(
+                name: pageNumberFont.postScriptName,
+                size: size * pageNumberFont.sizeMultiplier
+              ) else {
             return uiFont(
                 selectedFontId: bodyFontId,
                 size: size,
@@ -348,7 +588,7 @@ nonisolated enum AppFontCatalog {
     ) -> Font {
         guard isPageNumberFontUnlocked,
               let pageNumberFont = pageNumberFont(id: pageNumberFontId),
-              UIFont(name: pageNumberFont.postScriptName, size: size) != nil else {
+              UIFont(name: pageNumberFont.postScriptName, size: size * pageNumberFont.sizeMultiplier) != nil else {
             return swiftUIFont(
                 selectedFontId: bodyFontId,
                 size: size,
@@ -356,7 +596,7 @@ nonisolated enum AppFontCatalog {
             )
         }
 
-        return .custom(pageNumberFont.postScriptName, size: size)
+        return .custom(pageNumberFont.postScriptName, size: size * pageNumberFont.sizeMultiplier)
     }
 
     static func registerBundledFonts() {
@@ -378,9 +618,20 @@ nonisolated enum AppFontCatalog {
         font(id: defaultFontId) ?? all[0]
     }
 
+    private static func cachedUIFont(name: String, size: CGFloat) -> UIFont? {
+        let cacheKey = "\(name)-\(String(format: "%.3f", Double(size)))" as NSString
+        if let cachedFont = uiFontCache.object(forKey: cacheKey) {
+            return cachedFont
+        }
+
+        guard let font = UIFont(name: name, size: size) else { return nil }
+        uiFontCache.setObject(font, forKey: cacheKey)
+        return font
+    }
+
     private static func canLoad(_ font: AppFont) -> Bool {
         if let postScriptName = font.postScriptName,
-           UIFont(name: postScriptName, size: 12) != nil {
+           cachedUIFont(name: postScriptName, size: 12) != nil {
             return true
         }
 

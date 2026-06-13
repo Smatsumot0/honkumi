@@ -5,20 +5,23 @@ import Foundation
 final class EditorViewModel: ObservableObject {
     @Published private(set) var document: ManuscriptDocument
     @Published private(set) var characterCount = 0
-    @Published private(set) var manuscriptSheetCount = 0
     @Published private(set) var pageCount = 1
+    @Published private(set) var isPageCountCalculating = false
 
     private let documentStore: DocumentStore
     private var cancellables = Set<AnyCancellable>()
     private var metricsTask: Task<Void, Never>?
+    private var navigationTask: Task<Void, Never>?
     private var undoStack: [String] = []
     private var redoStack: [String] = []
     private var suppressNextDocumentChangeUndo = false
     private let historyLimit = 100
+    private var navigationDestinations: [Int] = [0]
 
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
         self.document = documentStore.document
+        updateNavigationDestinations(for: documentStore.document.body)
         scheduleMetricsUpdate(for: documentStore.document, debounceMilliseconds: 0)
 
         documentStore.$document
@@ -36,14 +39,18 @@ final class EditorViewModel: ObservableObject {
                         self.redoStack.removeAll()
                     }
                 }
+                if self.document.body != document.body || self.document.id != document.id {
+                    self.scheduleNavigationUpdate(for: document.body, debounceMilliseconds: 500)
+                }
                 self.document = document
-                self.scheduleMetricsUpdate(for: document, debounceMilliseconds: 250)
+                self.scheduleMetricsUpdate(for: document, debounceMilliseconds: 500)
             }
             .store(in: &cancellables)
     }
 
     deinit {
         metricsTask?.cancel()
+        navigationTask?.cancel()
     }
 
     var body: String {
@@ -69,25 +76,29 @@ final class EditorViewModel: ObservableObject {
     }
 
     func canMoveUp(from selectedRange: NSRange) -> Bool {
-        selectedRange.location > (chapterNavigationDestinations().first ?? 0)
+        clampedSelectionLocation(selectedRange) > (safeNavigationDestinations().first ?? 0)
     }
 
     func canMoveDown(from selectedRange: NSRange) -> Bool {
-        selectedRange.location < (chapterNavigationDestinations().last ?? 0)
+        clampedSelectionLocation(selectedRange) < (safeNavigationDestinations().last ?? 0)
     }
 
     func rangeForMovingUp(from selectedRange: NSRange) -> NSRange? {
-        let location = selectedRange.location
-        return chapterNavigationDestinations()
+        let location = clampedSelectionLocation(selectedRange)
+        return safeNavigationDestinations()
             .last(where: { $0 < location })
             .map { NSRange(location: $0, length: 0) }
     }
 
     func rangeForMovingDown(from selectedRange: NSRange) -> NSRange? {
-        let location = selectedRange.location
-        return chapterNavigationDestinations()
+        let location = clampedSelectionLocation(selectedRange)
+        return safeNavigationDestinations()
             .first(where: { $0 > location })
             .map { NSRange(location: $0, length: 0) }
+    }
+
+    func rangeForMovingToTop() -> NSRange {
+        NSRange(location: 0, length: 0)
     }
 
     func rangeForMovingToBottom() -> NSRange {
@@ -210,6 +221,10 @@ final class EditorViewModel: ObservableObject {
     private func scheduleMetricsUpdate(for document: ManuscriptDocument, debounceMilliseconds: UInt64) {
         metricsTask?.cancel()
         let documentSnapshot = document
+        let subscriptionStatus = documentStore.subscriptionStatus
+        if !isPageCountCalculating {
+            isPageCountCalculating = true
+        }
         metricsTask = Task.detached(priority: .utility) { [weak self] in
             if debounceMilliseconds > 0 {
                 try? await Task.sleep(for: .milliseconds(debounceMilliseconds))
@@ -217,14 +232,15 @@ final class EditorViewModel: ObservableObject {
             }
 
             let characterCount = ManuscriptMarkupParser.characterCountBody(from: documentSnapshot.body).count
-            let pageCount = ManuscriptPaginator.pages(for: documentSnapshot).count
-            let manuscriptSheetCount = max(Int(ceil(Double(characterCount) / 400.0)), characterCount == 0 ? 0 : 1)
-
+            let metricsDocument = ManuscriptRenderPipeline.preparedDocument(
+                from: documentSnapshot,
+                subscriptionStatus: subscriptionStatus
+            )
+            let pageCount = ManuscriptPaginator.pages(for: metricsDocument).count
             guard !Task.isCancelled else { return }
             await self?.applyMetrics(
                 characterCount: characterCount,
                 pageCount: pageCount,
-                manuscriptSheetCount: manuscriptSheetCount,
                 documentID: documentSnapshot.id
             )
         }
@@ -233,13 +249,12 @@ final class EditorViewModel: ObservableObject {
     private func applyMetrics(
         characterCount: Int,
         pageCount: Int,
-        manuscriptSheetCount: Int,
         documentID: UUID
     ) {
         guard document.id == documentID else { return }
         self.characterCount = characterCount
         self.pageCount = pageCount
-        self.manuscriptSheetCount = manuscriptSheetCount
+        self.isPageCountCalculating = false
     }
 
     private func clampedInsertionRange(_ range: NSRange, in text: String) -> NSRange {
@@ -247,8 +262,47 @@ final class EditorViewModel: ObservableObject {
         return NSRange(location: min(max(range.location, 0), length), length: 0)
     }
 
-    private func chapterNavigationDestinations() -> [Int] {
-        let body = document.body as NSString
+    private func clampedSelectionLocation(_ range: NSRange) -> Int {
+        let length = (document.body as NSString).length
+        guard range.location != NSNotFound else { return 0 }
+        return min(max(range.location, 0), length)
+    }
+
+    private func safeNavigationDestinations() -> [Int] {
+        let length = (document.body as NSString).length
+        let destinations = navigationDestinations
+            .filter { $0 >= 0 && $0 <= length }
+        guard !destinations.isEmpty else {
+            return Array(Set([0, length])).sorted()
+        }
+        return Array(Set(destinations + [0, length])).sorted()
+    }
+
+    private func updateNavigationDestinations(for bodyText: String) {
+        let body = bodyText as NSString
+        navigationDestinations = Self.chapterNavigationDestinations(in: body)
+    }
+
+    private func scheduleNavigationUpdate(for bodyText: String, debounceMilliseconds: UInt64) {
+        navigationTask?.cancel()
+        navigationTask = Task.detached(priority: .utility) { [weak self] in
+            if debounceMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(debounceMilliseconds))
+                guard !Task.isCancelled else { return }
+            }
+
+            let body = bodyText as NSString
+            let destinations = Self.chapterNavigationDestinations(in: body)
+            guard !Task.isCancelled else { return }
+            await self?.applyNavigationDestinations(destinations)
+        }
+    }
+
+    private func applyNavigationDestinations(_ destinations: [Int]) {
+        navigationDestinations = destinations
+    }
+
+    nonisolated private static func chapterNavigationDestinations(in body: NSString) -> [Int] {
         let chapterStarts = chapterStartLocations(in: body)
         guard !chapterStarts.isEmpty else {
             return Array(Set([0, body.length])).sorted()
@@ -265,7 +319,7 @@ final class EditorViewModel: ObservableObject {
         return destinations.sorted()
     }
 
-    private func chapterStartLocations(in body: NSString) -> [Int] {
+    nonisolated private static func chapterStartLocations(in body: NSString) -> [Int] {
         var locations: [Int] = []
         var location = 0
 
@@ -283,14 +337,14 @@ final class EditorViewModel: ObservableObject {
         return locations
     }
 
-    private func isChapterLine(_ line: String) -> Bool {
+    nonisolated private static func isChapterLine(_ line: String) -> Bool {
         let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
         let isBracketChapter = trimmedLine.hasPrefix(ManuscriptMarkupParser.chapterTagPrefix)
             && trimmedLine.hasSuffix(ManuscriptMarkupParser.chapterTagSuffix)
         return isBracketChapter || trimmedLine.hasPrefix("# ")
     }
 
-    private func chapterEndLocation(before nextStart: Int, in body: NSString) -> Int {
+    nonisolated private static func chapterEndLocation(before nextStart: Int, in body: NSString) -> Int {
         guard nextStart > 0 else { return 0 }
 
         var location = min(nextStart, body.length)

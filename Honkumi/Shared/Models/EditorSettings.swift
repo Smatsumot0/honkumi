@@ -2,9 +2,9 @@ import CoreGraphics
 import Foundation
 
 nonisolated struct EditorSettings: Codable, Equatable {
-    static let fontSizeRange: ClosedRange<CGFloat> = 8...14
-    static let charactersPerLineRange: ClosedRange<Int> = 25...45
-    static let linesPerPageRange: ClosedRange<Int> = 10...24
+    static let fontSizeRange: ClosedRange<CGFloat> = 7...20
+    static let charactersPerLineRange: ClosedRange<Int> = 25...54
+    static let linesPerPageRange: ClosedRange<Int> = 10...28
     static let marginTopRange: ClosedRange<CGFloat> = 8...30
     static let marginBottomRange: ClosedRange<CGFloat> = 8...30
     static let marginInnerRange: ClosedRange<CGFloat> = 10...30
@@ -13,10 +13,14 @@ nonisolated struct EditorSettings: Codable, Equatable {
     static let characterSpacingRange: ClosedRange<CGFloat> = 0...4
     static let maxConsecutiveBlankLinesRange: ClosedRange<Int> = 0...5
     static let pageNumberSizeRange: ClosedRange<CGFloat> = 6...18
+    static let pageNumberStartRange: ClosedRange<Int> = 1...9999
+    static let editorFontSizeRange: ClosedRange<CGFloat> = 7...20
 
     var pageSize: PageSize
     var selectedFontId: String
     var fontSize: CGFloat
+    var editorFontId: String
+    var editorFontSize: CGFloat
     var lineSpacing: CGFloat
     var characterSpacing: CGFloat
     var charactersPerLine: Int
@@ -28,12 +32,15 @@ nonisolated struct EditorSettings: Codable, Equatable {
     var isPageNumberEnabled: Bool
     var pageNumberFontId: String?
     var pageNumberSize: CGFloat
+    var pageNumberStart: Int
     var pageNumberPosition: PageNumberPosition
     var showTableOfContents: Bool
     var showChapterTitle: Bool
     var chapterTitleStyle: ChapterTitleStyle
     var startsChapterOnNewPage: Bool
     var alphanumericOrientation: AlphanumericOrientation
+    var useRecommendedPrintSettings: Bool
+    var showsCropMarks: Bool
     var colophon: ColophonSettings
     var formatSettings: FormatSettings
 
@@ -41,6 +48,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         pageSize: PageSize,
         selectedFontId: String,
         fontSize: CGFloat,
+        editorFontId: String = AppFontCatalog.defaultFontId,
+        editorFontSize: CGFloat = 14,
         lineSpacing: CGFloat,
         characterSpacing: CGFloat,
         charactersPerLine: Int,
@@ -52,18 +61,23 @@ nonisolated struct EditorSettings: Codable, Equatable {
         isPageNumberEnabled: Bool,
         pageNumberFontId: String?,
         pageNumberSize: CGFloat,
+        pageNumberStart: Int = 1,
         pageNumberPosition: PageNumberPosition,
         showTableOfContents: Bool,
         showChapterTitle: Bool,
         chapterTitleStyle: ChapterTitleStyle,
         startsChapterOnNewPage: Bool,
         alphanumericOrientation: AlphanumericOrientation = .sideways,
+        useRecommendedPrintSettings: Bool = true,
+        showsCropMarks: Bool = false,
         colophon: ColophonSettings = .default,
         formatSettings: FormatSettings = .default
     ) {
         self.pageSize = pageSize
         self.selectedFontId = selectedFontId
         self.fontSize = fontSize
+        self.editorFontId = editorFontId
+        self.editorFontSize = editorFontSize
         self.lineSpacing = lineSpacing
         self.characterSpacing = characterSpacing
         self.charactersPerLine = charactersPerLine
@@ -75,12 +89,15 @@ nonisolated struct EditorSettings: Codable, Equatable {
         self.isPageNumberEnabled = isPageNumberEnabled
         self.pageNumberFontId = pageNumberFontId
         self.pageNumberSize = pageNumberSize
+        self.pageNumberStart = pageNumberStart
         self.pageNumberPosition = pageNumberPosition
         self.showTableOfContents = showTableOfContents
         self.showChapterTitle = showChapterTitle
         self.chapterTitleStyle = chapterTitleStyle
         self.startsChapterOnNewPage = startsChapterOnNewPage
         self.alphanumericOrientation = alphanumericOrientation
+        self.useRecommendedPrintSettings = useRecommendedPrintSettings
+        self.showsCropMarks = showsCropMarks
         self.colophon = colophon
         self.formatSettings = formatSettings
     }
@@ -89,6 +106,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         pageSize: .a6,
         selectedFontId: AppFontCatalog.defaultFontId,
         fontSize: 9,
+        editorFontId: AppFontCatalog.defaultFontId,
+        editorFontSize: 14,
         lineSpacing: 0,
         characterSpacing: 0,
         charactersPerLine: 37,
@@ -100,12 +119,15 @@ nonisolated struct EditorSettings: Codable, Equatable {
         isPageNumberEnabled: true,
         pageNumberFontId: nil,
         pageNumberSize: 7,
+        pageNumberStart: 1,
         pageNumberPosition: .outside,
         showTableOfContents: false,
         showChapterTitle: false,
         chapterTitleStyle: .plain,
         startsChapterOnNewPage: false,
         alphanumericOrientation: .sideways,
+        useRecommendedPrintSettings: true,
+        showsCropMarks: false,
         colophon: .default,
         formatSettings: .default
     )
@@ -113,8 +135,10 @@ nonisolated struct EditorSettings: Codable, Equatable {
     var validated: EditorSettings {
         EditorSettings(
             pageSize: pageSize,
-            selectedFontId: selectedFontId.isEmpty ? AppFontCatalog.defaultFontId : selectedFontId,
+            selectedFontId: AppFontCatalog.normalizedFontId(selectedFontId),
             fontSize: fontSize.clamped(to: Self.fontSizeRange),
+            editorFontId: AppFontCatalog.normalizedFontId(editorFontId),
+            editorFontSize: editorFontSize.clamped(to: Self.editorFontSizeRange),
             lineSpacing: lineSpacing.clamped(to: Self.lineSpacingRange),
             characterSpacing: characterSpacing.clamped(to: Self.characterSpacingRange),
             charactersPerLine: charactersPerLine.clamped(to: Self.charactersPerLineRange),
@@ -126,12 +150,15 @@ nonisolated struct EditorSettings: Codable, Equatable {
             isPageNumberEnabled: isPageNumberEnabled,
             pageNumberFontId: pageNumberFontId,
             pageNumberSize: pageNumberSize.clamped(to: Self.pageNumberSizeRange),
+            pageNumberStart: pageNumberStart.clamped(to: Self.pageNumberStartRange),
             pageNumberPosition: pageNumberPosition,
             showTableOfContents: showTableOfContents,
             showChapterTitle: showChapterTitle,
             chapterTitleStyle: chapterTitleStyle,
             startsChapterOnNewPage: startsChapterOnNewPage,
-            alphanumericOrientation: .sideways,
+            alphanumericOrientation: alphanumericOrientation,
+            useRecommendedPrintSettings: useRecommendedPrintSettings,
+            showsCropMarks: showsCropMarks,
             colophon: colophon.validated,
             formatSettings: formatSettings.validated
         )
@@ -144,6 +171,8 @@ nonisolated extension EditorSettings {
         case selectedFontId
         case japaneseFont
         case fontSize
+        case editorFontId
+        case editorFontSize
         case lineSpacing
         case characterSpacing
         case charactersPerLine
@@ -155,12 +184,15 @@ nonisolated extension EditorSettings {
         case isPageNumberEnabled
         case pageNumberFontId
         case pageNumberSize
+        case pageNumberStart
         case pageNumberPosition
         case showTableOfContents
         case showChapterTitle
         case chapterTitleStyle
         case startsChapterOnNewPage
         case alphanumericOrientation
+        case useRecommendedPrintSettings
+        case showsCropMarks
         case colophon
         case formatSettings
     }
@@ -168,6 +200,12 @@ nonisolated extension EditorSettings {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = EditorSettings.default
+        let decodedSelectedFontId = try container.decodeIfPresent(String.self, forKey: .selectedFontId)
+            ?? Self.selectedFontIdFromLegacyJapaneseFont(
+                try container.decodeIfPresent(JapaneseFont.self, forKey: .japaneseFont)
+            )
+        let decodedEditorFontId = try container.decodeIfPresent(String.self, forKey: .editorFontId)
+            ?? decodedSelectedFontId
 
         let decodedPageNumberPosition = try container.decodeIfPresent(PageNumberPosition.self, forKey: .pageNumberPosition)
             ?? defaults.pageNumberPosition
@@ -176,11 +214,10 @@ nonisolated extension EditorSettings {
 
         self.init(
             pageSize: try container.decodeIfPresent(PageSize.self, forKey: .pageSize) ?? defaults.pageSize,
-            selectedFontId: try container.decodeIfPresent(String.self, forKey: .selectedFontId)
-                ?? Self.selectedFontIdFromLegacyJapaneseFont(
-                    try container.decodeIfPresent(JapaneseFont.self, forKey: .japaneseFont)
-                ),
+            selectedFontId: AppFontCatalog.normalizedFontId(decodedSelectedFontId),
             fontSize: try container.decodeIfPresent(CGFloat.self, forKey: .fontSize) ?? defaults.fontSize,
+            editorFontId: AppFontCatalog.normalizedFontId(decodedEditorFontId),
+            editorFontSize: try container.decodeIfPresent(CGFloat.self, forKey: .editorFontSize) ?? defaults.editorFontSize,
             lineSpacing: try container.decodeIfPresent(CGFloat.self, forKey: .lineSpacing) ?? defaults.lineSpacing,
             characterSpacing: try container.decodeIfPresent(CGFloat.self, forKey: .characterSpacing) ?? defaults.characterSpacing,
             charactersPerLine: try container.decodeIfPresent(Int.self, forKey: .charactersPerLine) ?? defaults.charactersPerLine,
@@ -192,12 +229,15 @@ nonisolated extension EditorSettings {
             isPageNumberEnabled: decodedIsPageNumberEnabled,
             pageNumberFontId: try container.decodeIfPresent(String.self, forKey: .pageNumberFontId),
             pageNumberSize: try container.decodeIfPresent(CGFloat.self, forKey: .pageNumberSize) ?? defaults.pageNumberSize,
+            pageNumberStart: try container.decodeIfPresent(Int.self, forKey: .pageNumberStart) ?? defaults.pageNumberStart,
             pageNumberPosition: decodedPageNumberPosition,
             showTableOfContents: try container.decodeIfPresent(Bool.self, forKey: .showTableOfContents) ?? defaults.showTableOfContents,
             showChapterTitle: try container.decodeIfPresent(Bool.self, forKey: .showChapterTitle) ?? defaults.showChapterTitle,
             chapterTitleStyle: try container.decodeIfPresent(ChapterTitleStyle.self, forKey: .chapterTitleStyle) ?? defaults.chapterTitleStyle,
             startsChapterOnNewPage: try container.decodeIfPresent(Bool.self, forKey: .startsChapterOnNewPage) ?? defaults.startsChapterOnNewPage,
             alphanumericOrientation: try container.decodeIfPresent(AlphanumericOrientation.self, forKey: .alphanumericOrientation) ?? defaults.alphanumericOrientation,
+            useRecommendedPrintSettings: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedPrintSettings) ?? true,
+            showsCropMarks: try container.decodeIfPresent(Bool.self, forKey: .showsCropMarks) ?? defaults.showsCropMarks,
             colophon: try container.decodeIfPresent(ColophonSettings.self, forKey: .colophon) ?? defaults.colophon,
             formatSettings: try container.decodeIfPresent(FormatSettings.self, forKey: .formatSettings) ?? defaults.formatSettings
         )
@@ -208,6 +248,8 @@ nonisolated extension EditorSettings {
         try container.encode(pageSize, forKey: .pageSize)
         try container.encode(selectedFontId, forKey: .selectedFontId)
         try container.encode(fontSize, forKey: .fontSize)
+        try container.encode(editorFontId, forKey: .editorFontId)
+        try container.encode(editorFontSize, forKey: .editorFontSize)
         try container.encode(lineSpacing, forKey: .lineSpacing)
         try container.encode(characterSpacing, forKey: .characterSpacing)
         try container.encode(charactersPerLine, forKey: .charactersPerLine)
@@ -219,12 +261,15 @@ nonisolated extension EditorSettings {
         try container.encode(isPageNumberEnabled, forKey: .isPageNumberEnabled)
         try container.encodeIfPresent(pageNumberFontId, forKey: .pageNumberFontId)
         try container.encode(pageNumberSize, forKey: .pageNumberSize)
+        try container.encode(pageNumberStart, forKey: .pageNumberStart)
         try container.encode(pageNumberPosition, forKey: .pageNumberPosition)
         try container.encode(showTableOfContents, forKey: .showTableOfContents)
         try container.encode(showChapterTitle, forKey: .showChapterTitle)
         try container.encode(chapterTitleStyle, forKey: .chapterTitleStyle)
         try container.encode(startsChapterOnNewPage, forKey: .startsChapterOnNewPage)
         try container.encode(alphanumericOrientation, forKey: .alphanumericOrientation)
+        try container.encode(useRecommendedPrintSettings, forKey: .useRecommendedPrintSettings)
+        try container.encode(showsCropMarks, forKey: .showsCropMarks)
         try container.encode(colophon, forKey: .colophon)
         try container.encode(formatSettings, forKey: .formatSettings)
     }
