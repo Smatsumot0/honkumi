@@ -138,59 +138,60 @@ nonisolated enum AppFontCatalog {
     private static let bodyPDFFontSizeAdjustments: [String: PDFBodyFontSizeAdjustment] = [
         defaultFontId: PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 3,
-            pageNumberDelta: -1,
+            pageNumberDelta: -2,
             exclamationQuestionDelta: 1
         ),
         "biz-ud-gothic": PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 2,
-            pageNumberDelta: -1
+            pageNumberDelta: -2
         ),
         "m-plus-1": PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 2,
-            pageNumberDelta: -1,
+            pageNumberDelta: -2,
             exclamationQuestionDelta: 1
         ),
         "zen-old-mincho": PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 2,
-            pageNumberDelta: -1,
+            pageNumberDelta: -2,
             longVowelYOffset: 72 / 25.4
         ),
         "shippori-mincho": PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 2,
-            pageNumberDelta: -1
+            pageNumberDelta: -2
         )
     ]
     private static let pageNumberPDFFontSizeAdjustments: [String: PDFPageNumberFontSizeAdjustment] = [
         "caveat": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 2,
-            pageNumberDelta: -1
+            tableOfContentsDelta: 7,
+            pageNumberDelta: -4
         ),
         "cherry-bomb-one": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 1,
-            pageNumberDelta: -4
+            tableOfContentsDelta: 3,
+            pageNumberDelta: -5
         ),
         "dancing-script": PDFPageNumberFontSizeAdjustment(
-            pageNumberDelta: -4
+            tableOfContentsDelta: 3,
+            pageNumberDelta: -7
         ),
         "great-vibes": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 2,
-            pageNumberDelta: -2
+            tableOfContentsDelta: 6,
+            pageNumberDelta: -4
         ),
         "hachi-maru-pop": PDFPageNumberFontSizeAdjustment(
             tableOfContentsDelta: 2,
-            pageNumberDelta: -3
+            pageNumberDelta: -6
         ),
         "homemade-apple": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 4,
-            pageNumberDelta: -2
+            tableOfContentsDelta: 6,
+            pageNumberDelta: -4
         ),
         "love-light": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 2,
-            pageNumberDelta: -2
+            tableOfContentsDelta: 6,
+            pageNumberDelta: -3
         ),
         "pacifico": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 3,
-            pageNumberDelta: -2
+            tableOfContentsDelta: 6,
+            pageNumberDelta: -4
         )
     ]
 

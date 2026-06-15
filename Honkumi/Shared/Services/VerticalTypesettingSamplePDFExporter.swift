@@ -36,6 +36,13 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
                 print("Exported spread preview sample PDF:", spreadOutputURL.path)
             }
 
+            if environment["HONKUMI_EXPORT_COLOPHON_REGRESSION_SAMPLES"] == "1" {
+                try exportColophonRegressionSamples(
+                    exporter: exporter,
+                    to: destinationDirectory
+                )
+            }
+
             if environment["HONKUMI_EXPORT_ALL_FONT_SAMPLES"] == "1" {
                 try exportAllFontSamples(
                     exporter: exporter,
@@ -126,6 +133,110 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
         print("Exported all-font sample PDF:", outputURL.path)
     }
 
+    private static func exportColophonRegressionSamples(
+        exporter: BodyPDFExportService,
+        to destinationDirectory: URL
+    ) throws {
+        for testCase in colophonRegressionCases() {
+            var document = sampleDocument(
+                title: "奥付回帰 \(testCase.title)",
+                orientation: .tateChuYoko
+            )
+            document.body = colophonRegressionBody
+            document.settings.showTableOfContents = false
+            document.settings.colophon.printerName = testCase.printerName
+
+            let publisherSettings = publisherSettings(from: testCase)
+            let outputDocument = document.applyingPublisherInfo(from: publisherSettings)
+            let temporaryURL = try exporter.export(document: outputDocument, subscriptionStatus: .free)
+            let outputURL = destinationDirectory
+                .appendingPathComponent(document.title)
+                .appendingPathExtension("pdf")
+            try? FileManager.default.removeItem(at: outputURL)
+            try FileManager.default.copyItem(at: temporaryURL, to: outputURL)
+            print("Exported colophon regression sample PDF:", outputURL.path)
+
+            let previewURL = try exporter.exportPreviewPDF(
+                document: outputDocument,
+                subscriptionStatus: .free,
+                previewKind: .spread,
+                generationID: UUID()
+            )
+            let previewOutputURL = destinationDirectory
+                .appendingPathComponent(document.title + " 見開きプレビュー")
+                .appendingPathExtension("pdf")
+            try? FileManager.default.removeItem(at: previewOutputURL)
+            try FileManager.default.copyItem(at: previewURL, to: previewOutputURL)
+            print("Exported colophon regression preview PDF:", previewOutputURL.path)
+        }
+    }
+
+    private static func publisherSettings(from testCase: ColophonRegressionCase) -> EditorSettings {
+        var settings = EditorSettings.default.validated
+        var colophon = ColophonSettings.default
+        colophon.publisherName = testCase.publisherName
+        colophon.authorName = testCase.authorName
+        colophon.circleName = testCase.circleName
+        colophon.showsWebsiteURL = testCase.showsWebsiteURL
+        colophon.showsQRCode = testCase.showsQRCode
+        colophon.websiteURL = testCase.websiteURL
+        colophon.xURL = testCase.xURL
+        colophon.pixivURL = testCase.pixivURL
+        colophon.contact = testCase.contact
+        colophon.notes = testCase.notes
+        settings.colophon = colophon
+        return settings
+    }
+
+    private static func colophonRegressionCases() -> [ColophonRegressionCase] {
+        [
+            ColophonRegressionCase(
+                title: "HPのみ marshmallow messages",
+                publisherName: "山田太郎",
+                authorName: "Honkumi確認用",
+                circleName: "サンプルサークル",
+                printerName: "サンプル印刷所",
+                showsWebsiteURL: true,
+                showsQRCode: true,
+                websiteURL: "https://marshmallow-qa.com/messages"
+            ),
+            ColophonRegressionCase(
+                title: "SNSのみ ID",
+                publisherName: "山田太郎",
+                authorName: "Honkumi確認用",
+                circleName: "サンプルサークル",
+                printerName: "サンプル印刷所",
+                showsWebsiteURL: false,
+                showsQRCode: false,
+                xURL: "nagano_dc"
+            ),
+            ColophonRegressionCase(
+                title: "メールのみ short",
+                publisherName: "山田太郎",
+                authorName: "Honkumi確認用",
+                circleName: "サンプルサークル",
+                printerName: "サンプル印刷所",
+                showsWebsiteURL: false,
+                showsQRCode: false,
+                contact: "contact@example.com"
+            ),
+            ColophonRegressionCase(
+                title: "HP SNS メール long",
+                publisherName: "山田太郎",
+                authorName: "Honkumi確認用の作者名が長い場合のサンプル",
+                circleName: "サンプルサークル名が長い場合の奥付確認用",
+                printerName: "サンプル印刷所名が長い場合の奥付確認用印刷所",
+                showsWebsiteURL: true,
+                showsQRCode: true,
+                websiteURL: "https://example.com/very/long/path/to/sample-page-for-honkumi-pdf-output-test",
+                xURL: "https://twitter.com/nagano_dc",
+                pixivURL: "https://www.pixiv.net/users/sample-vertical-typesetting",
+                contact: "nagano092k@example-long-domain-for-honkumi-check.test",
+                notes: "HP、SNS、メールをすべて入力した奥付回帰確認用です。"
+            )
+        ]
+    }
+
     private static func sampleDocuments() -> [ManuscriptDocument] {
         let documents = [
             sampleDocument(title: "サンプル", orientation: .tateChuYoko),
@@ -175,6 +286,8 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
         colophon.authorName = "Honkumi確認用"
         colophon.circleName = "サンプルサークル"
         colophon.websiteURL = "https://marshmallow-qa.com/nagano_dc/sample-vertical-typesetting"
+        colophon.xURL = "https://x.com/nagano_dc"
+        colophon.pixivURL = "https://www.pixiv.net/users/sample-vertical-typesetting"
         colophon.contact = "nagano092k@example-long-domain-for-honkumi-check.test"
         colophon.notes = "句読点・英数字・括弧・リーダー・奥付の確認用サンプルです。"
         settings.colophon = colophon
@@ -190,6 +303,27 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
         components.day = 3
         return components.date ?? Date(timeIntervalSince1970: 0)
     }
+
+    private struct ColophonRegressionCase {
+        var title: String
+        var publisherName: String
+        var authorName: String
+        var circleName: String
+        var printerName: String
+        var showsWebsiteURL: Bool
+        var showsQRCode: Bool
+        var websiteURL: String = ""
+        var xURL: String = ""
+        var pixivURL: String = ""
+        var contact: String = ""
+        var notes: String = ""
+    }
+
+    private static let colophonRegressionBody = """
+    奥付回帰確認用の本文です。
+    実機入力値とサンプル値が同じPDF出力コードを通ることを確認します。
+    [[colophon]]
+    """
 
     private static let sampleBody = """
     [[toc]]

@@ -256,11 +256,11 @@ nonisolated struct BodyPDFExportService {
                 settings: settings,
                 previewKind: previewKind
             )
-            let lastContentPageIndex = renderedPages.lastIndex { renderedPage in
-                if case .content = renderedPage.kind { return true }
-                return false
-            }
-            for (index, renderedPage) in renderedPages.enumerated() {
+            let poweredByTargetPageID = poweredByHonkumiTargetPageID(
+                in: pages,
+                subscriptionStatus: subscriptionStatus
+            )
+            for renderedPage in renderedPages {
                 let layout = LayoutCalculator.layout(for: settings, pageNumber: renderedPage.layoutPageNumber)
                 let geometry = PDFPrintProduction.pageGeometry(for: layout)
 
@@ -278,7 +278,7 @@ nonisolated struct BodyPDFExportService {
                 draw(
                     page,
                     displayedPageNumber: displayedPageNumber,
-                    isLastContentPage: index == lastContentPageIndex,
+                    showsPoweredByHonkumi: page.id == poweredByTargetPageID,
                     subscriptionStatus: subscriptionStatus,
                     in: layout
                 )
@@ -329,10 +329,10 @@ nonisolated struct BodyPDFExportService {
             }
 
             let renderedPages = spreadRenderedPages(from: pages, settings: settings)
-            let lastContentPageIndex = renderedPages.lastIndex { renderedPage in
-                if case .content = renderedPage.kind { return true }
-                return false
-            }
+            let poweredByTargetPageID = poweredByHonkumiTargetPageID(
+                in: pages,
+                subscriptionStatus: subscriptionStatus
+            )
 
             for pairStart in stride(from: 0, to: renderedPages.count, by: 2) {
                 let leftPage = renderedPages[pairStart]
@@ -349,16 +349,14 @@ nonisolated struct BodyPDFExportService {
 
                 drawRenderedSpreadPreviewPage(
                     leftPage,
-                    flatIndex: pairStart,
-                    lastContentPageIndex: lastContentPageIndex,
+                    poweredByTargetPageID: poweredByTargetPageID,
                     settings: settings,
                     subscriptionStatus: subscriptionStatus,
                     at: CGPoint(x: 0, y: 0)
                 )
                 drawRenderedSpreadPreviewPage(
                     rightPage,
-                    flatIndex: pairStart + 1,
-                    lastContentPageIndex: lastContentPageIndex,
+                    poweredByTargetPageID: poweredByTargetPageID,
                     settings: settings,
                     subscriptionStatus: subscriptionStatus,
                     at: CGPoint(x: firstGeometry.mediaBox.width + gap, y: 0)
@@ -369,8 +367,7 @@ nonisolated struct BodyPDFExportService {
 
     private func drawRenderedSpreadPreviewPage(
         _ renderedPage: RenderedPDFPage,
-        flatIndex: Int,
-        lastContentPageIndex: Int?,
+        poweredByTargetPageID: UUID?,
         settings: EditorSettings,
         subscriptionStatus: SubscriptionStatus,
         at origin: CGPoint
@@ -395,7 +392,7 @@ nonisolated struct BodyPDFExportService {
         draw(
             page,
             displayedPageNumber: displayedPageNumber,
-            isLastContentPage: flatIndex == lastContentPageIndex,
+            showsPoweredByHonkumi: page.id == poweredByTargetPageID,
             subscriptionStatus: subscriptionStatus,
             in: layout
         )
@@ -608,7 +605,7 @@ nonisolated struct BodyPDFExportService {
     private func draw(
         _ page: PreviewPage,
         displayedPageNumber: Int?,
-        isLastContentPage: Bool,
+        showsPoweredByHonkumi: Bool,
         subscriptionStatus: SubscriptionStatus,
         in layout: PageLayout
     ) {
@@ -648,11 +645,7 @@ nonisolated struct BodyPDFExportService {
 
         drawPageNumber(displayedPageNumber, subscriptionStatus: subscriptionStatus, in: layout)
 
-        if shouldShowPoweredByHonkumi(
-            page: page,
-            isLastContentPage: isLastContentPage,
-            subscriptionStatus: subscriptionStatus
-        ) {
+        if showsPoweredByHonkumi {
             drawPoweredByHonkumi(
                 on: page,
                 displayedPageNumber: displayedPageNumber,
@@ -855,7 +848,10 @@ nonisolated struct BodyPDFExportService {
         let visibleTitleCells = Array(titleCells.prefix(maxTitleCellCount))
         let leaderStartRow = min(visibleTitleCells.count + gapCellCount, characterCount)
         let leaderEndRow = max(leaderStartRow, pageStartRow - gapCellCount)
-        let leader = "︙"
+        let leader = tableOfContentsLeader(
+            pageNumberFontId: layout.settings.pageNumberFontId,
+            isPageNumberFontUnlocked: isAdditionalFontPackUnlocked
+        )
         var cells = Array(repeating: [String](), count: characterCount)
         let pageNumberRows = Set(pageStartRow..<(pageStartRow + pageNumberCells.count))
 
@@ -891,6 +887,16 @@ nonisolated struct BodyPDFExportService {
                 in: layout
             )
         }
+    }
+
+    private func tableOfContentsLeader(
+        pageNumberFontId: String?,
+        isPageNumberFontUnlocked: Bool
+    ) -> String {
+        isPageNumberFontUnlocked
+            && AppFontCatalog.usesDotLeaderInTableOfContents(pageNumberFontId: pageNumberFontId)
+            ? "・"
+            : "︙"
     }
 
     private func drawVerticalText(
@@ -1009,17 +1015,20 @@ nonisolated struct BodyPDFExportService {
                 continue
             }
 
-            let attributedText = NSAttributedString(string: glyph.text, attributes: glyphAttributes)
-            let glyphSize = (glyph.text as NSString).size(withAttributes: glyphAttributes)
+            let drawableText = printablePDFText(glyph.text)
+            guard !drawableText.isEmpty else { continue }
+
+            let attributedText = NSAttributedString(string: drawableText, attributes: glyphAttributes)
+            let glyphSize = (drawableText as NSString).size(withAttributes: glyphAttributes)
             let drawPoint = CGPoint(
                 x: cellOrigin.x + (layout.lineAdvance - glyphSize.width) / 2 + offset.width,
                 y: cellOrigin.y + (cellHeight - glyphSize.height) / 2 + offset.height
             )
 
             if glyph.rotationDegrees == 0 {
-                if VerticalTextTypesetter.isAlphanumericRun(glyph.text) {
+                if VerticalTextTypesetter.isAlphanumericRun(drawableText) {
                     drawCenteredUprightGlyph(
-                        glyph.text,
+                        drawableText,
                         attributes: glyphAttributes,
                         glyphSize: glyphSize,
                         cellOrigin: cellOrigin,
@@ -1137,6 +1146,9 @@ nonisolated struct BodyPDFExportService {
         isAdditionalFontPackUnlocked: Bool,
         in layout: PageLayout
     ) {
+        let title = printablePDFText(title)
+        guard !title.isEmpty else { return }
+
         let font = pdfFont(
             size: max(layout.fontSize * 0.8, 6),
             in: layout,
@@ -1220,10 +1232,10 @@ nonisolated struct BodyPDFExportService {
                 colophon: colophon,
                 subscriptionStatus: subscriptionStatus,
                 lineHeight: lineHeight,
-                valueAttributes: valueAttributes,
                 in: layout
             )
-            guard cursorY < layout.bodyFrame.maxY - min(lineHeight, entryHeight) else { break }
+            let maximumEntryY = layout.bodyFrame.maxY - min(lineHeight, entryHeight)
+            guard cursorY <= maximumEntryY + 0.5 else { break }
 
             if entry.id == "hp" {
                 drawHorizontalColophonHPEntry(
@@ -1249,35 +1261,50 @@ nonisolated struct BodyPDFExportService {
                         in: layout
                       ) {
             } else if entry.label.isEmpty {
-                let textAttributes = entry.centersInHorizontalLayout
-                    ? centeredAttributes(from: valueAttributes)
-                    : valueAttributes
-                (entry.value as NSString).draw(
-                    in: CGRect(x: layout.bodyFrame.minX, y: cursorY, width: layout.bodyFrame.width, height: lineHeight),
-                    withAttributes: textAttributes
-                )
-            } else {
-                (entry.label as NSString).draw(
-                    in: CGRect(x: layout.bodyFrame.minX, y: cursorY, width: labelWidth, height: lineHeight),
-                    withAttributes: labelAttributes
-                )
-                if shouldFitHorizontalColophonValue(entry) {
-                    drawFittedHorizontalColophonValue(
+                if entry.centersInHorizontalLayout {
+                    drawCenteredFittedHorizontalColophonValue(
                         entry.value,
-                        x: valueX,
+                        x: layout.bodyFrame.minX,
                         y: cursorY,
-                        maxWidth: layout.bodyFrame.maxX - valueX,
+                        maxWidth: layout.bodyFrame.width,
                         baseLineHeight: lineHeight,
                         baseAttributes: valueAttributes,
                         isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
                         in: layout
                     )
                 } else {
-                    (entry.value as NSString).draw(
-                        in: CGRect(x: valueX, y: cursorY, width: layout.bodyFrame.maxX - valueX, height: lineHeight),
-                        withAttributes: valueAttributes
+                    drawFittedHorizontalColophonValue(
+                        entry.value,
+                        x: layout.bodyFrame.minX,
+                        y: cursorY,
+                        maxWidth: layout.bodyFrame.width,
+                        baseLineHeight: lineHeight,
+                        baseAttributes: valueAttributes,
+                        isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+                        in: layout
                     )
                 }
+            } else {
+                drawFittedHorizontalColophonLabel(
+                    entry.label,
+                    x: layout.bodyFrame.minX,
+                    y: cursorY,
+                    maxWidth: labelWidth,
+                    baseLineHeight: lineHeight,
+                    baseAttributes: labelAttributes,
+                    isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+                    in: layout
+                )
+                drawFittedHorizontalColophonValue(
+                    entry.value,
+                    x: valueX,
+                    y: cursorY,
+                    maxWidth: layout.bodyFrame.maxX - valueX,
+                    baseLineHeight: lineHeight,
+                    baseAttributes: valueAttributes,
+                    isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+                    in: layout
+                )
             }
             cursorY += entryHeight
             if entry.addsFollowingSpace {
@@ -1296,16 +1323,6 @@ nonisolated struct BodyPDFExportService {
         guard !entries.isEmpty else { return 0 }
 
         var height: CGFloat = CGFloat(max(entries.count - 1, 0)) * 8
-        let font = pdfFont(
-            size: layout.fontSize,
-            in: layout,
-            isAdditionalFontPackUnlocked: subscriptionStatus == .paid
-        )
-        let valueAttributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: UIColor.black
-        ]
-
         for entry in entries {
             if entry.addsPrecedingSpace {
                 height += lineHeight
@@ -1316,7 +1333,6 @@ nonisolated struct BodyPDFExportService {
                 colophon: colophon,
                 subscriptionStatus: subscriptionStatus,
                 lineHeight: lineHeight,
-                valueAttributes: valueAttributes,
                 in: layout
             )
 
@@ -1333,7 +1349,6 @@ nonisolated struct BodyPDFExportService {
         colophon: ColophonSettings,
         subscriptionStatus: SubscriptionStatus,
         lineHeight: CGFloat,
-        valueAttributes: [NSAttributedString.Key: Any],
         in layout: PageLayout
     ) -> CGFloat {
         if entry.id == "hp", !colophon.websiteURL.isEmpty {
@@ -1349,7 +1364,7 @@ nonisolated struct BodyPDFExportService {
                     ).height
                     : 0
                 return horizontalColophonQRCodeSize(in: layout)
-                    + (colophon.showsWebsiteURL ? 4 + textHeight : 0)
+                    + (colophon.showsWebsiteURL ? horizontalColophonQRCodeTextGap(in: layout) + textHeight : 0)
             }
 
             return max(
@@ -1367,15 +1382,23 @@ nonisolated struct BodyPDFExportService {
         if entry.id == "creator",
            subscriptionStatus == .paid,
            colophon.hasCreatorImage {
-            return max(lineHeight, creatorImageBlockHeight(colophon, lineHeight: lineHeight, in: layout))
+            return max(
+                lineHeight,
+                creatorImageBlockHeight(
+                    colophon,
+                    lineHeight: lineHeight,
+                    isAdditionalFontPackUnlocked: true,
+                    in: layout
+                )
+            )
         }
 
-        if shouldFitHorizontalColophonValue(entry) {
+        if entry.label.isEmpty {
             return max(
                 lineHeight,
                 fittedHorizontalColophonValueLayout(
                     entry.value,
-                    maxWidth: horizontalColophonValueWidth(in: layout),
+                    maxWidth: layout.bodyFrame.width,
                     baseLineHeight: lineHeight,
                     isAdditionalFontPackUnlocked: subscriptionStatus == .paid,
                     in: layout
@@ -1383,7 +1406,16 @@ nonisolated struct BodyPDFExportService {
             )
         }
 
-        return lineHeight
+        return max(
+            lineHeight,
+            fittedHorizontalColophonValueLayout(
+                entry.value,
+                maxWidth: horizontalColophonValueWidth(in: layout),
+                baseLineHeight: lineHeight,
+                isAdditionalFontPackUnlocked: subscriptionStatus == .paid,
+                in: layout
+            ).height
+        )
     }
 
     @discardableResult
@@ -1399,9 +1431,15 @@ nonisolated struct BodyPDFExportService {
         isAdditionalFontPackUnlocked: Bool,
         in layout: PageLayout
     ) -> CGFloat {
-        (entry.label as NSString).draw(
-            in: CGRect(x: layout.bodyFrame.minX, y: y, width: labelWidth, height: lineHeight),
-            withAttributes: labelAttributes
+        drawFittedHorizontalColophonLabel(
+            entry.label,
+            x: layout.bodyFrame.minX,
+            y: y,
+            maxWidth: labelWidth,
+            baseLineHeight: lineHeight,
+            baseAttributes: labelAttributes,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+            in: layout
         )
 
         guard colophon.showsQRCode, let qrCode = qrCodeMatrix(for: colophon.websiteURL) else {
@@ -1432,8 +1470,8 @@ nonisolated struct BodyPDFExportService {
         let urlX = blockX + max((blockWidth - valueLayout.frameWidth) / 2, 0)
         drawQRCode(qrCode, in: CGRect(x: qrX, y: y, width: qrSize, height: qrSize))
 
-        let valueY = y + qrSize + 4
-        if colophon.showsWebsiteURL, valueY < layout.bodyFrame.maxY - valueLayout.height {
+        let valueY = y + qrSize + horizontalColophonQRCodeTextGap(in: layout)
+        if colophon.showsWebsiteURL, valueY <= layout.bodyFrame.maxY - valueLayout.height + 0.5 {
             drawFittedHorizontalColophonValue(
                 entry.value,
                 x: urlX,
@@ -1447,21 +1485,17 @@ nonisolated struct BodyPDFExportService {
             )
         }
 
-        return qrSize + (colophon.showsWebsiteURL ? 4 + valueLayout.height : 0)
+        return qrSize + (colophon.showsWebsiteURL ? horizontalColophonQRCodeTextGap(in: layout) + valueLayout.height : 0)
+    }
+
+    private func horizontalColophonQRCodeTextGap(in layout: PageLayout) -> CGFloat {
+        max(layout.fontSize * 0.65, 5)
     }
 
     private func horizontalColophonValueWidth(in layout: PageLayout) -> CGFloat {
         let labelWidth = min(layout.bodyFrame.width * 0.28, 72)
         let valueX = layout.bodyFrame.minX + labelWidth + 10
         return max(layout.bodyFrame.maxX - valueX, 1)
-    }
-
-    private func shouldFitHorizontalColophonValue(_ entry: ColophonEntry) -> Bool {
-        if ["hp", "x", "pixiv", "contact"].contains(entry.id) {
-            return true
-        }
-
-        return isLongInlineColophonText(entry.value)
     }
 
     private func fittedHorizontalColophonValueLayout(
@@ -1552,42 +1586,39 @@ nonisolated struct BodyPDFExportService {
     }
 
     private func printableColophonInlineText(_ text: String) -> String {
-        let filteredScalars = text.unicodeScalars.filter { scalar in
-            if scalar.value == 0xFFFE || scalar.value == 0xFFFF {
-                return false
-            }
-            return !CharacterSet.controlCharacters.contains(scalar)
-        }
-        return String(String.UnicodeScalarView(filteredScalars))
+        printablePDFText(text)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func isLongInlineColophonText(_ text: String) -> Bool {
-        let printableText = printableColophonInlineText(text)
-        guard !printableText.isEmpty else { return false }
+    private func printablePDFText(_ text: String) -> String {
+        let filteredScalars = text.unicodeScalars.filter { scalar in
+            !isInvisiblePDFTextScalar(scalar)
+        }
+        return String(String.UnicodeScalarView(filteredScalars))
+    }
 
-        if printableText.contains("://") || printableText.contains("@") {
+    private func isInvisiblePDFTextScalar(_ scalar: Unicode.Scalar) -> Bool {
+        if CharacterSet.controlCharacters.contains(scalar) {
             return true
         }
 
-        let allowedBreakCharacters: Set<Character> = ["/", ".", "-", "@"]
-        var currentASCIIRun = 0
-        var longestASCIIRun = 0
-        var hasBreakCharacter = false
-
-        for character in printableText {
-            if allowedBreakCharacters.contains(character) {
-                hasBreakCharacter = true
-            }
-            if character.unicodeScalars.allSatisfy({ (0x21...0x7E).contains($0.value) }) {
-                currentASCIIRun += 1
-                longestASCIIRun = max(longestASCIIRun, currentASCIIRun)
-            } else {
-                currentASCIIRun = 0
-            }
+        switch scalar.value {
+        case 0x00AD, // soft hyphen
+             0x034F,
+             0x061C,
+             0x180E,
+             0x200B...0x200F,
+             0x202A...0x202E,
+             0x2060...0x206F,
+             0xE000...0xF8FF,
+             0xFE00...0xFE0F,
+             0xFEFF,
+             0xE0100...0xE01EF,
+             0xFFF9...0xFFFF:
+            return true
+        default:
+            return false
         }
-
-        return longestASCIIRun >= 16 && hasBreakCharacter
     }
 
     private func colophonKernToFit(
@@ -1665,6 +1696,144 @@ nonisolated struct BodyPDFExportService {
     }
 
     @discardableResult
+    private func drawFittedHorizontalColophonLabel(
+        _ text: String,
+        x: CGFloat,
+        y: CGFloat,
+        maxWidth: CGFloat,
+        baseLineHeight: CGFloat,
+        baseAttributes: [NSAttributedString.Key: Any],
+        isAdditionalFontPackUnlocked: Bool,
+        in layout: PageLayout
+    ) -> CGFloat {
+        let textLayout = fittedHorizontalColophonLabelLayout(
+            text,
+            maxWidth: maxWidth,
+            baseLineHeight: baseLineHeight,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+            in: layout
+        )
+        var attributes = baseAttributes
+        attributes[.font] = pdfFont(
+            size: textLayout.fontSize,
+            in: layout,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+        )
+        if abs(textLayout.kern) > 0.001 {
+            attributes[.kern] = textLayout.kern
+        } else {
+            attributes.removeValue(forKey: .kern)
+        }
+
+        let originY = y + max((baseLineHeight - textLayout.lineHeight) / 2, 0)
+        for line in textLayout.lines {
+            (line as NSString).draw(
+                at: CGPoint(x: x, y: originY),
+                withAttributes: attributes
+            )
+        }
+
+        return max(baseLineHeight, textLayout.height)
+    }
+
+    private func fittedHorizontalColophonLabelLayout(
+        _ text: String,
+        maxWidth: CGFloat,
+        baseLineHeight: CGFloat,
+        isAdditionalFontPackUnlocked: Bool,
+        in layout: PageLayout
+    ) -> HorizontalColophonTextLayout {
+        let maxWidth = max(maxWidth, 1)
+        let printableText = printableColophonInlineText(text)
+        let baseFontSize = max(layout.fontSize, 6)
+        let minimumFontSize: CGFloat = 6
+        let fontStep: CGFloat = 0.25
+
+        func width(for text: String, fontSize: CGFloat, kern: CGFloat = 0) -> CGFloat {
+            let font = pdfFont(
+                size: fontSize,
+                in: layout,
+                isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+            )
+            var attributes: [NSAttributedString.Key: Any] = [.font: font]
+            if abs(kern) > 0.001 {
+                attributes[.kern] = kern
+            }
+            return (text as NSString).size(withAttributes: attributes).width
+        }
+
+        func lineHeight(for fontSize: CGFloat) -> CGFloat {
+            max(fontSize * 1.35, baseLineHeight * 0.72)
+        }
+
+        var fontSize = baseFontSize
+        while fontSize >= minimumFontSize - 0.001 {
+            let textWidth = width(for: printableText, fontSize: fontSize)
+            if textWidth <= maxWidth + 0.5 {
+                let resolvedLineHeight = fontSize == baseFontSize
+                    ? baseLineHeight
+                    : lineHeight(for: fontSize)
+                return HorizontalColophonTextLayout(
+                    fontSize: fontSize,
+                    lineHeight: resolvedLineHeight,
+                    lines: [printableText],
+                    frameWidth: min(max(textWidth, 1), maxWidth),
+                    textWidth: min(textWidth, maxWidth),
+                    kern: 0
+                )
+            }
+            fontSize -= fontStep
+        }
+
+        let textWidth = width(for: printableText, fontSize: minimumFontSize)
+        let characterCount = max(printableText.count - 1, 1)
+        let kern = textWidth > maxWidth + 0.5
+            ? min(0, (maxWidth - textWidth) / CGFloat(characterCount))
+            : 0
+        let fittedWidth = width(for: printableText, fontSize: minimumFontSize, kern: kern)
+        return HorizontalColophonTextLayout(
+            fontSize: minimumFontSize,
+            lineHeight: lineHeight(for: minimumFontSize),
+            lines: [printableText],
+            frameWidth: min(max(fittedWidth, 1), maxWidth),
+            textWidth: min(fittedWidth, maxWidth),
+            kern: kern
+        )
+    }
+
+    @discardableResult
+    private func drawCenteredFittedHorizontalColophonValue(
+        _ text: String,
+        x: CGFloat,
+        y: CGFloat,
+        maxWidth: CGFloat,
+        baseLineHeight: CGFloat,
+        baseAttributes: [NSAttributedString.Key: Any],
+        isAdditionalFontPackUnlocked: Bool,
+        in layout: PageLayout
+    ) -> CGFloat {
+        let textLayout = fittedHorizontalColophonValueLayout(
+            text,
+            maxWidth: maxWidth,
+            baseLineHeight: baseLineHeight,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+            in: layout
+        )
+        let textX = x + max((maxWidth - textLayout.frameWidth) / 2, 0)
+        return drawFittedHorizontalColophonValue(
+            text,
+            x: textX,
+            y: y,
+            maxWidth: textLayout.frameWidth,
+            baseLineHeight: baseLineHeight,
+            baseAttributes: baseAttributes,
+            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+            in: layout,
+            precomputedLayout: textLayout
+        )
+    }
+
+    @discardableResult
     private func drawFittedHorizontalColophonValue(
         _ text: String,
         x: CGFloat,
@@ -1733,14 +1902,15 @@ nonisolated struct BodyPDFExportService {
             ? colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
         if !authorName.isEmpty {
-            (authorName as NSString).draw(
-                in: CGRect(
-                    x: layout.bodyFrame.minX,
-                    y: y + height + 4,
-                    width: layout.bodyFrame.width,
-                    height: lineHeight
-                ),
-                withAttributes: centeredAttributes(from: valueAttributes)
+            drawCenteredFittedHorizontalColophonValue(
+                authorName,
+                x: layout.bodyFrame.minX,
+                y: y + height + 4,
+                maxWidth: layout.bodyFrame.width,
+                baseLineHeight: lineHeight,
+                baseAttributes: valueAttributes,
+                isAdditionalFontPackUnlocked: true,
+                in: layout
             )
         }
 
@@ -1762,26 +1932,25 @@ nonisolated struct BodyPDFExportService {
     private func creatorImageBlockHeight(
         _ colophon: ColophonSettings,
         lineHeight: CGFloat,
+        isAdditionalFontPackUnlocked: Bool,
         in layout: PageLayout
     ) -> CGFloat {
         let hasAuthorName = colophon.showsAuthorName
             && !colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return creatorImageHeight(in: layout) + (hasAuthorName ? 4 + lineHeight : 0)
+        let authorHeight = hasAuthorName
+            ? fittedHorizontalColophonValueLayout(
+                colophon.authorName,
+                maxWidth: layout.bodyFrame.width,
+                baseLineHeight: lineHeight,
+                isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
+                in: layout
+            ).height
+            : 0
+        return creatorImageHeight(in: layout) + (hasAuthorName ? 4 + authorHeight : 0)
     }
 
     private func creatorImageHeight(in layout: PageLayout) -> CGFloat {
         max(layout.fontSize * 2.4, 18)
-    }
-
-    private func centeredAttributes(
-        from attributes: [NSAttributedString.Key: Any]
-    ) -> [NSAttributedString.Key: Any] {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .center
-
-        var centeredAttributes = attributes
-        centeredAttributes[.paragraphStyle] = paragraphStyle
-        return centeredAttributes
     }
 
     private func drawVerticalColophonQRCode(_ colophon: ColophonSettings, columns: [String], in layout: PageLayout) {
@@ -1958,21 +2127,23 @@ nonisolated struct BodyPDFExportService {
         return min(y, max(FooterPlacement.bottomInset, maxY))
     }
 
-    private func shouldShowPoweredByHonkumi(
-        page: PreviewPage,
-        isLastContentPage: Bool,
+    private func poweredByHonkumiTargetPageID(
+        in pages: [PreviewPage],
         subscriptionStatus: SubscriptionStatus
-    ) -> Bool {
-        guard subscriptionStatus.showsPoweredByHonkumi else { return false }
+    ) -> UUID? {
+        guard subscriptionStatus.showsPoweredByHonkumi else { return nil }
 
-        switch page.kind {
-        case .body:
-            return isLastContentPage
-        case .tableOfContents:
+        if let colophonPage = pages.last(where: { page in
+            if case .colophon = page.kind { return true }
             return false
-        case .colophon:
-            return true
+        }) {
+            return colophonPage.id
         }
+
+        return pages.last(where: { page in
+            if case .body = page.kind { return true }
+            return false
+        })?.id
     }
 
     private func qrCodeMatrix(for text: String) -> QRCodeMatrix? {

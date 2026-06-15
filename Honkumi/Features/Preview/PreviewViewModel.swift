@@ -396,7 +396,7 @@ nonisolated enum ManuscriptPaginator {
                 value: (colophon.showsWebsiteURL || colophon.showsQRCode) ? colophon.websiteURL : "",
                 addsFollowingSpace: false
             ),
-            ColophonEntry(id: "x", label: "x（旧Twitter）", value: colophon.xURL, addsFollowingSpace: false),
+            ColophonEntry(id: "x", label: "X", value: colophon.xURL, addsFollowingSpace: false),
             ColophonEntry(id: "pixiv", label: "pixiv", value: colophon.pixivURL, addsFollowingSpace: false),
             ColophonEntry(id: "contact", label: "連絡先", value: colophon.contact, addsFollowingSpace: false),
             ColophonEntry(
@@ -485,7 +485,11 @@ nonisolated enum ManuscriptPaginator {
         return entry.title + separator + pageNumber
     }
 
-    private static let tableOfContentsLeader = "︙"
+    private static func tableOfContentsLeader(settings: EditorSettings) -> String {
+        AppFontCatalog.usesDotLeaderInTableOfContents(pageNumberFontId: settings.pageNumberFontId)
+            ? "・"
+            : "︙"
+    }
 
     private static func tableOfContentsSeparator(availableCellCount: Int, settings: EditorSettings) -> String {
         guard availableCellCount > 0 else { return "" }
@@ -494,7 +498,7 @@ nonisolated enum ManuscriptPaginator {
         guard availableCellCount > reservedSpaceCount else {
             return String(repeating: "　", count: availableCellCount)
         }
-        let leader = tableOfContentsLeader
+        let leader = tableOfContentsLeader(settings: settings)
         let dottedLeader = Array(repeating: leader, count: availableCellCount - reservedSpaceCount).joined()
         let sideSpaces = String(repeating: "　", count: sideSpaceCount)
         return sideSpaces + dottedLeader + sideSpaces
