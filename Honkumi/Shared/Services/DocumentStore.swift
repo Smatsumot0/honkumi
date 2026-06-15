@@ -106,7 +106,7 @@ final class DocumentStore: ObservableObject {
                 categoryId: categoryExists ? targetCategoryId : WorkCategory.uncategorizedId,
                 title: trimmedTitle.isEmpty ? "無題の作品" : trimmedTitle,
                 body: "",
-                settings: data.userDefaultSettings.validated
+                settings: Self.settingsForNewWork(from: data.userDefaultSettings)
             )
             data.works.append(createdWork)
             data.activeWorkId = createdWork.id
@@ -118,7 +118,10 @@ final class DocumentStore: ObservableObject {
         updateAppData { data in
             data.works.removeAll { $0.id == id }
             if data.works.isEmpty {
-                let work = ManuscriptDocument(title: "無題の作品", settings: data.userDefaultSettings.validated)
+                let work = ManuscriptDocument(
+                    title: "無題の作品",
+                    settings: Self.settingsForNewWork(from: data.userDefaultSettings)
+                )
                 data.works = [work]
                 data.activeWorkId = work.id
             } else if data.activeWorkId == id {
@@ -265,6 +268,7 @@ final class DocumentStore: ObservableObject {
     private static func normalized(_ data: AppData) -> AppData {
         var normalizedData = data
         normalizedData.version = AppData.currentVersion
+        normalizedData.userDefaultSettings = normalizedData.userDefaultSettings.validated
 
         if !normalizedData.categories.contains(where: { $0.id == WorkCategory.uncategorizedId }) {
             normalizedData.categories.insert(.uncategorized, at: 0)
@@ -279,7 +283,10 @@ final class DocumentStore: ObservableObject {
         }
 
         if normalizedData.works.isEmpty {
-            let work = ManuscriptDocument(title: "無題の作品", settings: normalizedData.userDefaultSettings.validated)
+            let work = ManuscriptDocument(
+                title: "無題の作品",
+                settings: Self.settingsForNewWork(from: normalizedData.userDefaultSettings)
+            )
             normalizedData.works = [work]
             normalizedData.activeWorkId = work.id
         }
@@ -300,5 +307,12 @@ final class DocumentStore: ObservableObject {
         }
 
         return data.works.first ?? ManuscriptDocument(title: "無題の作品")
+    }
+
+    private static func settingsForNewWork(from settings: EditorSettings) -> EditorSettings {
+        var settings = settings.validated
+        settings.useRecommendedTypography = true
+        settings.useRecommendedMargins = true
+        return settings.validated
     }
 }

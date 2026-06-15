@@ -61,7 +61,9 @@ struct SettingsView: View {
     @ViewBuilder
     private var printSettingsForm: some View {
         let printSettings = viewModel.printSettingsForDisplay
-        let usesRecommendedPrintSettings = viewModel.settings.useRecommendedPrintSettings
+        let usesRecommendedTypography = viewModel.settings.useRecommendedTypography
+        let usesRecommendedMargins = viewModel.settings.useRecommendedMargins
+        let isRecommendationAvailable = viewModel.isPrintRecommendationAvailable
 
         Form {
             Section("用紙") {
@@ -72,28 +74,6 @@ struct SettingsView: View {
                     ForEach(PageSize.selectableCases) { pageSize in
                         Text(pageSize.displayName).tag(pageSize)
                     }
-                }
-            }
-
-            Section("推奨設定") {
-                Toggle(isOn: Binding(
-                    get: { viewModel.settings.useRecommendedPrintSettings },
-                    set: { viewModel.updateUseRecommendedPrintSettings($0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("推奨設定を使用")
-                        Text(usesRecommendedPrintSettings
-                            ? "用紙サイズとページ数に合わせて、印刷向けの安全な余白・組版設定を自動適用します。"
-                            : "推奨設定をオフにすると、余白・文字サイズ・行数・文字数などを手動で調整できます。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
-                }
-
-                if usesRecommendedPrintSettings {
-                    LabeledContent("想定ページ数", value: "\(viewModel.estimatedPrintPageCount)ページ")
-                    LabeledContent("本文フォント", value: currentFontDisplayName)
                 }
             }
 
@@ -117,6 +97,24 @@ struct SettingsView: View {
             }
 
             Section("組版") {
+                Toggle(isOn: Binding(
+                    get: { viewModel.settings.useRecommendedTypography },
+                    set: { viewModel.updateUseRecommendedTypography($0) }
+                )) {
+                    recommendationToggleLabel(
+                        title: "推奨設定を使用する",
+                        description: "用紙サイズと本文量に合わせて、文字サイズ・文字数・行数を自動設定します。"
+                    )
+                }
+
+                if usesRecommendedTypography && !isRecommendationAvailable {
+                    recommendationUnavailableText
+                }
+
+                if usesRecommendedTypography {
+                    LabeledContent("想定ページ数", value: "\(viewModel.estimatedPrintPageCount)ページ")
+                }
+
                 NavigationLink {
                     fontSettingsView
                 } label: {
@@ -125,101 +123,106 @@ struct SettingsView: View {
                         Spacer()
                         Text(currentFontDisplayName)
                             .font(AppFontCatalog.swiftUIFont(
-                                selectedFontId: printSettings.selectedFontId,
+                                selectedFontId: viewModel.settings.selectedFontId,
                                 size: 17,
                                 isAdditionalFontPackUnlocked: true
                             ))
                             .foregroundStyle(.secondary)
                     }
                 }
-                .disabled(usesRecommendedPrintSettings)
 
-                valueStepper(
-                    title: "文字サイズ",
-                    value: printSettings.fontSize,
-                    range: EditorSettings.fontSizeRange,
-                    step: 0.5,
-                    format: "%.1f pt",
-                    update: viewModel.updateFontSize
-                )
-                .disabled(usesRecommendedPrintSettings)
+                if usesRecommendedTypography {
+                    readOnlySettingRow(title: "文字サイズ", value: formattedPointValue(printSettings.fontSize))
+                    readOnlySettingRow(title: "1行あたり", value: "\(printSettings.charactersPerLine)字")
+                    readOnlySettingRow(title: "1ページあたり", value: "\(printSettings.linesPerPage)行")
+                } else {
+                    valueStepper(
+                        title: "文字サイズ",
+                        value: printSettings.fontSize,
+                        range: EditorSettings.fontSizeRange,
+                        step: 0.5,
+                        format: "%.1f pt",
+                        update: viewModel.updateFontSize
+                    )
 
-                intStepper(
-                    title: "1行あたり",
-                    value: printSettings.charactersPerLine,
-                    unit: "文字",
-                    range: EditorSettings.charactersPerLineRange,
-                    update: viewModel.updateCharactersPerLine
-                )
-                .disabled(usesRecommendedPrintSettings)
+                    intStepper(
+                        title: "1行あたり",
+                        value: printSettings.charactersPerLine,
+                        unit: "字",
+                        range: EditorSettings.charactersPerLineRange,
+                        update: viewModel.updateCharactersPerLine
+                    )
 
-                intStepper(
-                    title: "1ページあたり",
-                    value: printSettings.linesPerPage,
-                    unit: "行",
-                    range: EditorSettings.linesPerPageRange,
-                    update: viewModel.updateLinesPerPage
-                )
-                .disabled(usesRecommendedPrintSettings)
-
-                valueStepper(
-                    title: "字間",
-                    value: printSettings.characterSpacing,
-                    range: EditorSettings.characterSpacingRange,
-                    step: 0.1,
-                    format: "%.1f pt",
-                    update: viewModel.updateCharacterSpacing
-                )
-                .disabled(usesRecommendedPrintSettings)
-
-                valueStepper(
-                    title: "行間",
-                    value: printSettings.lineSpacing,
-                    range: EditorSettings.lineSpacingRange,
-                    step: 0.5,
-                    format: "%.1f pt",
-                    update: viewModel.updateLineSpacing
-                )
-                .disabled(usesRecommendedPrintSettings)
+                    intStepper(
+                        title: "1ページあたり",
+                        value: printSettings.linesPerPage,
+                        unit: "行",
+                        range: EditorSettings.linesPerPageRange,
+                        update: viewModel.updateLinesPerPage
+                    )
+                }
             }
 
             Section("余白") {
-                valueStepper(
-                    title: "天",
-                    value: printSettings.marginTop,
-                    range: EditorSettings.marginTopRange,
-                    step: 1,
-                    format: "%.0f mm",
-                    update: viewModel.updateMarginTop
-                )
-                .disabled(usesRecommendedPrintSettings)
-                valueStepper(
-                    title: "地",
-                    value: printSettings.marginBottom,
-                    range: EditorSettings.marginBottomRange,
-                    step: 1,
-                    format: "%.0f mm",
-                    update: viewModel.updateMarginBottom
-                )
-                .disabled(usesRecommendedPrintSettings)
-                valueStepper(
-                    title: "ノド",
-                    value: printSettings.marginInner,
-                    range: EditorSettings.marginInnerRange,
-                    step: 1,
-                    format: "%.0f mm",
-                    update: viewModel.updateMarginInner
-                )
-                .disabled(usesRecommendedPrintSettings)
-                valueStepper(
-                    title: "小口",
-                    value: printSettings.marginOuter,
-                    range: EditorSettings.marginOuterRange,
-                    step: 1,
-                    format: "%.0f mm",
-                    update: viewModel.updateMarginOuter
-                )
-                .disabled(usesRecommendedPrintSettings)
+                Toggle(isOn: Binding(
+                    get: { viewModel.settings.useRecommendedMargins },
+                    set: { viewModel.updateUseRecommendedMargins($0) }
+                )) {
+                    recommendationToggleLabel(
+                        title: "推奨設定を使用する",
+                        description: "用紙サイズと本文量に合わせて、読みやすい余白を自動設定します。"
+                    )
+                }
+
+                if usesRecommendedMargins && !isRecommendationAvailable {
+                    recommendationUnavailableText
+                }
+
+                if usesRecommendedMargins {
+                    readOnlySettingRow(title: "天余白", value: formattedMillimeterValue(printSettings.marginTop))
+                    readOnlySettingRow(title: "地余白", value: formattedMillimeterValue(printSettings.marginBottom))
+                    readOnlySettingRow(title: "小口余白", value: formattedMillimeterValue(printSettings.marginOuter))
+                    readOnlySettingRow(title: "ノド余白", value: formattedMillimeterValue(printSettings.marginInner))
+
+                    if viewModel.showsWideGutterRecommendationNote {
+                        Text(viewModel.wideGutterRecommendationNote)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    valueStepper(
+                        title: "天余白",
+                        value: printSettings.marginTop,
+                        range: EditorSettings.marginTopRange,
+                        step: 1,
+                        format: "%.0f mm",
+                        update: viewModel.updateMarginTop
+                    )
+                    valueStepper(
+                        title: "地余白",
+                        value: printSettings.marginBottom,
+                        range: EditorSettings.marginBottomRange,
+                        step: 1,
+                        format: "%.0f mm",
+                        update: viewModel.updateMarginBottom
+                    )
+                    valueStepper(
+                        title: "小口",
+                        value: printSettings.marginOuter,
+                        range: EditorSettings.marginOuterRange,
+                        step: 1,
+                        format: "%.0f mm",
+                        update: viewModel.updateMarginOuter
+                    )
+                    valueStepper(
+                        title: "ノド",
+                        value: printSettings.marginInner,
+                        range: EditorSettings.marginInnerRange,
+                        step: 1,
+                        format: "%.0f mm",
+                        update: viewModel.updateMarginInner
+                    )
+                }
             }
 
             Section("章タイトル") {
@@ -697,6 +700,40 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func recommendationToggleLabel(title: String, description: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+            Text(description)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var recommendationUnavailableText: some View {
+        Text(viewModel.unsupportedRecommendationMessage)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+    }
+
+    private func readOnlySettingRow(title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Spacer()
+            Text(value)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func formattedPointValue(_ value: CGFloat) -> String {
+        String(format: "%.1f pt", EditorSettings.roundedPrintFontSize(value))
+    }
+
+    private func formattedMillimeterValue(_ value: CGFloat) -> String {
+        String(format: "%.0f mm", value)
     }
 
     private func intStepper(

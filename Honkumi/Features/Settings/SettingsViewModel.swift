@@ -81,6 +81,25 @@ final class SettingsViewModel: ObservableObject {
         )
     }
 
+    var isPrintRecommendationAvailable: Bool {
+        RecommendedPrintSettings.supportsRecommendations(for: settings.pageSize)
+    }
+
+    var unsupportedRecommendationMessage: String {
+        RecommendedPrintSettings.unsupportedPageSizeMessage
+    }
+
+    var showsWideGutterRecommendationNote: Bool {
+        RecommendedPrintSettings.shouldShowWideGutterNote(
+            body: printRecommendationBody,
+            settings: settings
+        )
+    }
+
+    var wideGutterRecommendationNote: String {
+        RecommendedPrintSettings.wideGutterNote
+    }
+
     private var printRecommendationBody: String {
         switch scope {
         case .activeWork:
@@ -90,42 +109,59 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
-    func updateUseRecommendedPrintSettings(_ value: Bool) {
+    func updateUseRecommendedTypography(_ value: Bool) {
         var updated = settings
-        if updated.useRecommendedPrintSettings,
+        if updated.useRecommendedTypography,
            !value,
-           Self.hasDefaultManualPrintFields(updated) {
-            updated = Self.copyManualPrintFields(from: printSettingsForDisplay, to: updated)
+           Self.hasDefaultManualTypographyFields(updated) {
+            updated = Self.copyManualTypographyFields(from: printSettingsForDisplay, to: updated)
         }
-        updated.useRecommendedPrintSettings = value
+        updated.useRecommendedTypography = value
         settings = updated
     }
 
-    private static func hasDefaultManualPrintFields(_ settings: EditorSettings) -> Bool {
+    func updateUseRecommendedMargins(_ value: Bool) {
+        var updated = settings
+        if updated.useRecommendedMargins,
+           !value,
+           Self.hasDefaultManualMarginFields(updated) {
+            updated = Self.copyManualMarginFields(from: printSettingsForDisplay, to: updated)
+        }
+        updated.useRecommendedMargins = value
+        settings = updated
+    }
+
+    private static func hasDefaultManualTypographyFields(_ settings: EditorSettings) -> Bool {
         let defaults = EditorSettings.default
-        return settings.selectedFontId == defaults.selectedFontId
-            && settings.fontSize == defaults.fontSize
-            && settings.lineSpacing == defaults.lineSpacing
-            && settings.characterSpacing == defaults.characterSpacing
+        return settings.fontSize == defaults.fontSize
             && settings.charactersPerLine == defaults.charactersPerLine
             && settings.linesPerPage == defaults.linesPerPage
-            && settings.marginTop == defaults.marginTop
+    }
+
+    private static func hasDefaultManualMarginFields(_ settings: EditorSettings) -> Bool {
+        let defaults = EditorSettings.default
+        return settings.marginTop == defaults.marginTop
             && settings.marginBottom == defaults.marginBottom
             && settings.marginInner == defaults.marginInner
             && settings.marginOuter == defaults.marginOuter
     }
 
-    private static func copyManualPrintFields(
+    private static func copyManualTypographyFields(
         from recommended: EditorSettings,
         to settings: EditorSettings
     ) -> EditorSettings {
         var updated = settings
-        updated.selectedFontId = recommended.selectedFontId
         updated.fontSize = recommended.fontSize
-        updated.lineSpacing = recommended.lineSpacing
-        updated.characterSpacing = recommended.characterSpacing
         updated.charactersPerLine = recommended.charactersPerLine
         updated.linesPerPage = recommended.linesPerPage
+        return updated
+    }
+
+    private static func copyManualMarginFields(
+        from recommended: EditorSettings,
+        to settings: EditorSettings
+    ) -> EditorSettings {
+        var updated = settings
         updated.marginTop = recommended.marginTop
         updated.marginBottom = recommended.marginBottom
         updated.marginInner = recommended.marginInner
@@ -147,7 +183,7 @@ final class SettingsViewModel: ObservableObject {
 
     func updateFontSize(_ value: CGFloat) {
         var updated = settings
-        updated.fontSize = value
+        updated.fontSize = EditorSettings.roundedPrintFontSize(value)
         settings = updated
     }
 
@@ -165,13 +201,13 @@ final class SettingsViewModel: ObservableObject {
 
     func updateLineSpacing(_ value: CGFloat) {
         var updated = settings
-        updated.lineSpacing = value
+        updated.lineSpacing = 0
         settings = updated
     }
 
     func updateCharacterSpacing(_ value: CGFloat) {
         var updated = settings
-        updated.characterSpacing = value
+        updated.characterSpacing = 0
         settings = updated
     }
 
@@ -195,6 +231,13 @@ final class SettingsViewModel: ObservableObject {
 
     func updateMarginBottom(_ value: CGFloat) {
         var updated = settings
+        updated.marginBottom = value
+        settings = updated
+    }
+
+    func updateVerticalMargins(_ value: CGFloat) {
+        var updated = settings
+        updated.marginTop = value
         updated.marginBottom = value
         settings = updated
     }

@@ -16,6 +16,10 @@ nonisolated struct EditorSettings: Codable, Equatable {
     static let pageNumberStartRange: ClosedRange<Int> = 1...9999
     static let editorFontSizeRange: ClosedRange<CGFloat> = 7...20
 
+    static func roundedPrintFontSize(_ value: CGFloat) -> CGFloat {
+        ((value * 2).rounded() / 2).clamped(to: fontSizeRange)
+    }
+
     var pageSize: PageSize
     var selectedFontId: String
     var fontSize: CGFloat
@@ -39,10 +43,21 @@ nonisolated struct EditorSettings: Codable, Equatable {
     var chapterTitleStyle: ChapterTitleStyle
     var startsChapterOnNewPage: Bool
     var alphanumericOrientation: AlphanumericOrientation
-    var useRecommendedPrintSettings: Bool
+    var useRecommendedTypography: Bool
+    var useRecommendedMargins: Bool
     var showsCropMarks: Bool
     var colophon: ColophonSettings
     var formatSettings: FormatSettings
+
+    var useRecommendedPrintSettings: Bool {
+        get {
+            useRecommendedTypography && useRecommendedMargins
+        }
+        set {
+            useRecommendedTypography = newValue
+            useRecommendedMargins = newValue
+        }
+    }
 
     init(
         pageSize: PageSize,
@@ -68,7 +83,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         chapterTitleStyle: ChapterTitleStyle,
         startsChapterOnNewPage: Bool,
         alphanumericOrientation: AlphanumericOrientation = .sideways,
-        useRecommendedPrintSettings: Bool = true,
+        useRecommendedTypography: Bool = true,
+        useRecommendedMargins: Bool = true,
         showsCropMarks: Bool = false,
         colophon: ColophonSettings = .default,
         formatSettings: FormatSettings = .default
@@ -96,7 +112,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         self.chapterTitleStyle = chapterTitleStyle
         self.startsChapterOnNewPage = startsChapterOnNewPage
         self.alphanumericOrientation = alphanumericOrientation
-        self.useRecommendedPrintSettings = useRecommendedPrintSettings
+        self.useRecommendedTypography = useRecommendedTypography
+        self.useRecommendedMargins = useRecommendedMargins
         self.showsCropMarks = showsCropMarks
         self.colophon = colophon
         self.formatSettings = formatSettings
@@ -110,12 +127,12 @@ nonisolated struct EditorSettings: Codable, Equatable {
         editorFontSize: 14,
         lineSpacing: 0,
         characterSpacing: 0,
-        charactersPerLine: 37,
-        linesPerPage: 17,
-        marginTop: 18,
-        marginBottom: 15,
-        marginInner: 10,
-        marginOuter: 10,
+        charactersPerLine: 38,
+        linesPerPage: 16,
+        marginTop: 16,
+        marginBottom: 16,
+        marginInner: 15,
+        marginOuter: 13,
         isPageNumberEnabled: true,
         pageNumberFontId: nil,
         pageNumberSize: 7,
@@ -126,7 +143,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         chapterTitleStyle: .plain,
         startsChapterOnNewPage: false,
         alphanumericOrientation: .sideways,
-        useRecommendedPrintSettings: true,
+        useRecommendedTypography: true,
+        useRecommendedMargins: true,
         showsCropMarks: false,
         colophon: .default,
         formatSettings: .default
@@ -136,11 +154,11 @@ nonisolated struct EditorSettings: Codable, Equatable {
         EditorSettings(
             pageSize: pageSize,
             selectedFontId: AppFontCatalog.normalizedFontId(selectedFontId),
-            fontSize: fontSize.clamped(to: Self.fontSizeRange),
+            fontSize: Self.roundedPrintFontSize(fontSize),
             editorFontId: AppFontCatalog.normalizedFontId(editorFontId),
             editorFontSize: editorFontSize.clamped(to: Self.editorFontSizeRange),
-            lineSpacing: lineSpacing.clamped(to: Self.lineSpacingRange),
-            characterSpacing: characterSpacing.clamped(to: Self.characterSpacingRange),
+            lineSpacing: 0,
+            characterSpacing: 0,
             charactersPerLine: charactersPerLine.clamped(to: Self.charactersPerLineRange),
             linesPerPage: linesPerPage.clamped(to: Self.linesPerPageRange),
             marginTop: marginTop.clamped(to: Self.marginTopRange),
@@ -157,7 +175,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
             chapterTitleStyle: chapterTitleStyle,
             startsChapterOnNewPage: startsChapterOnNewPage,
             alphanumericOrientation: alphanumericOrientation,
-            useRecommendedPrintSettings: useRecommendedPrintSettings,
+            useRecommendedTypography: useRecommendedTypography,
+            useRecommendedMargins: useRecommendedMargins,
             showsCropMarks: showsCropMarks,
             colophon: colophon.validated,
             formatSettings: formatSettings.validated
@@ -192,6 +211,8 @@ nonisolated extension EditorSettings {
         case startsChapterOnNewPage
         case alphanumericOrientation
         case useRecommendedPrintSettings
+        case useRecommendedTypography
+        case useRecommendedMargins
         case showsCropMarks
         case colophon
         case formatSettings
@@ -211,6 +232,11 @@ nonisolated extension EditorSettings {
             ?? defaults.pageNumberPosition
         let decodedIsPageNumberEnabled = try container.decodeIfPresent(Bool.self, forKey: .isPageNumberEnabled)
             ?? (decodedPageNumberPosition != .hidden)
+        let legacyUseRecommendedPrintSettings = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .useRecommendedPrintSettings
+        )
+        let migratedRecommendationDefault = legacyUseRecommendedPrintSettings ?? false
 
         self.init(
             pageSize: try container.decodeIfPresent(PageSize.self, forKey: .pageSize) ?? defaults.pageSize,
@@ -236,7 +262,8 @@ nonisolated extension EditorSettings {
             chapterTitleStyle: try container.decodeIfPresent(ChapterTitleStyle.self, forKey: .chapterTitleStyle) ?? defaults.chapterTitleStyle,
             startsChapterOnNewPage: try container.decodeIfPresent(Bool.self, forKey: .startsChapterOnNewPage) ?? defaults.startsChapterOnNewPage,
             alphanumericOrientation: try container.decodeIfPresent(AlphanumericOrientation.self, forKey: .alphanumericOrientation) ?? defaults.alphanumericOrientation,
-            useRecommendedPrintSettings: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedPrintSettings) ?? true,
+            useRecommendedTypography: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedTypography) ?? migratedRecommendationDefault,
+            useRecommendedMargins: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedMargins) ?? migratedRecommendationDefault,
             showsCropMarks: try container.decodeIfPresent(Bool.self, forKey: .showsCropMarks) ?? defaults.showsCropMarks,
             colophon: try container.decodeIfPresent(ColophonSettings.self, forKey: .colophon) ?? defaults.colophon,
             formatSettings: try container.decodeIfPresent(FormatSettings.self, forKey: .formatSettings) ?? defaults.formatSettings
@@ -268,7 +295,8 @@ nonisolated extension EditorSettings {
         try container.encode(chapterTitleStyle, forKey: .chapterTitleStyle)
         try container.encode(startsChapterOnNewPage, forKey: .startsChapterOnNewPage)
         try container.encode(alphanumericOrientation, forKey: .alphanumericOrientation)
-        try container.encode(useRecommendedPrintSettings, forKey: .useRecommendedPrintSettings)
+        try container.encode(useRecommendedTypography, forKey: .useRecommendedTypography)
+        try container.encode(useRecommendedMargins, forKey: .useRecommendedMargins)
         try container.encode(showsCropMarks, forKey: .showsCropMarks)
         try container.encode(colophon, forKey: .colophon)
         try container.encode(formatSettings, forKey: .formatSettings)

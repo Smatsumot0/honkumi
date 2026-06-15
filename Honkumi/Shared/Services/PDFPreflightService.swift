@@ -752,8 +752,11 @@ nonisolated struct PDFPreflightService {
         issues.append(info(
             id: "info.recommendedPrintSettings",
             title: "推奨設定",
-            message: settings.useRecommendedPrintSettings ? "ON。推奨設定を適用しています。" : "OFF。手動設定を適用しています。",
-            location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "useRecommendedPrintSettings")
+            message: [
+                "組版 \(settings.useRecommendedTypography ? "ON" : "OFF")",
+                "余白 \(settings.useRecommendedMargins ? "ON" : "OFF")"
+            ].joined(separator: " / "),
+            location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "recommendedPrintSettings")
         ))
         issues.append(info(
             id: "info.bodyFont",
