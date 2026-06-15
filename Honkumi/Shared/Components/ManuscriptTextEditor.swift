@@ -14,6 +14,7 @@ enum ManuscriptTextEditorScrollDirection: Equatable {
 private enum ManuscriptTextEditorLayout {
     static let textContainerInsets = UIEdgeInsets(top: 8, left: 6, bottom: 20, right: 6)
     static let scrollContentInsets = UIEdgeInsets(top: 0, left: 0, bottom: 96, right: 0)
+    static let lineHeightMultiple: CGFloat = 1.8
 }
 
 private final class ManuscriptUIKitTextView: UITextView {
@@ -143,17 +144,33 @@ struct ManuscriptTextEditor: UIViewRepresentable {
 
     private func applyEditorStyle(to textView: UITextView, coordinator: Coordinator) {
         let font = editorFont()
-        let styleSignature = "\(font.fontName)-\(font.pointSize)"
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineHeightMultiple = ManuscriptTextEditorLayout.lineHeightMultiple
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        let textAttributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: paragraphStyle
+        ]
+        let styleSignature = "\(font.fontName)-\(font.pointSize)-\(ManuscriptTextEditorLayout.lineHeightMultiple)"
 
         textView.font = font
-        textView.typingAttributes = [
-            .font: font,
-            .foregroundColor: UIColor.label
-        ]
+        textView.typingAttributes = textAttributes
 
         guard coordinator.needsFullStyleRefresh || coordinator.appliedStyleSignature != styleSignature else { return }
         coordinator.needsFullStyleRefresh = false
         coordinator.appliedStyleSignature = styleSignature
+
+        let textLength = (textView.text as NSString).length
+        guard textLength > 0 else { return }
+
+        let selectedRange = textView.selectedRange
+        let contentOffset = textView.contentOffset
+        textView.textStorage.beginEditing()
+        textView.textStorage.setAttributes(textAttributes, range: NSRange(location: 0, length: textLength))
+        textView.textStorage.endEditing()
+        textView.selectedRange = clampedRange(selectedRange, in: textView.text ?? "")
+        textView.setContentOffset(contentOffset, animated: false)
     }
 
     private func applyEditorScrollInsets(to textView: UITextView) {

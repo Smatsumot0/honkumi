@@ -283,8 +283,11 @@ struct EditorView: View {
     }
 
     private func handleScrollDirection(_ direction: ManuscriptTextEditorScrollDirection) {
-        if !isEditorChromeVisible {
+        switch direction {
+        case .up:
             isEditorChromeVisible = true
+        case .down:
+            isEditorChromeVisible = false
         }
     }
 
