@@ -259,12 +259,14 @@ struct SettingsView: View {
 
                 if viewModel.isActiveWorkScope, viewModel.settings.colophon.isEnabled {
                     Toggle("発行日を表示", isOn: colophonBinding(\.showsPublicationDate))
-                    PublicationDateField(date: publicationDateOptionalBinding)
-                        .disabled(!viewModel.settings.colophon.showsPublicationDate)
+                    if viewModel.settings.colophon.showsPublicationDate {
+                        PublicationDateField(date: publicationDateOptionalBinding)
+                    }
 
                     Toggle("印刷所を表示", isOn: colophonBinding(\.showsPrinterName))
-                    TextField("印刷所名", text: colophonBinding(\.printerName))
-                        .disabled(!viewModel.settings.colophon.showsPrinterName)
+                    if viewModel.settings.colophon.showsPrinterName {
+                        TextField("印刷所名", text: colophonBinding(\.printerName))
+                    }
                 }
             }
 

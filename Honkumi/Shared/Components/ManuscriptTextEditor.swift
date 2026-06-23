@@ -187,11 +187,15 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         private var keyboardTransitionOffset: CGPoint?
         private var keyboardTransitionWorkItem: DispatchWorkItem?
         private var lastScrollOffsetY: CGFloat?
-        private var lastReportedScrollDirection: ManuscriptTextEditorScrollDirection?
+        private var lastDispatchedScrollDirection: ManuscriptTextEditorScrollDirection?
+        private var pendingScrollDirection: ManuscriptTextEditorScrollDirection?
+        private var pendingScrollDirectionWorkItem: DispatchWorkItem?
+        private var lastScrollDirectionDispatchDate = Date.distantPast
         private var suppressesSelectionScrollingUntil: Date?
         var didRestoreInitialOffset = false
         var needsFullStyleRefresh = true
         var appliedStyleSignature: String?
+        private let scrollDirectionThrottleInterval: TimeInterval = 0.12
 
         init(_ parent: ManuscriptTextEditor) {
             self.parent = parent
@@ -200,6 +204,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         deinit {
             NotificationCenter.default.removeObserver(self)
             keyboardTransitionWorkItem?.cancel()
+            pendingScrollDirectionWorkItem?.cancel()
         }
 
         func attach(to textView: UITextView) {
@@ -295,7 +300,6 @@ struct ManuscriptTextEditor: UIViewRepresentable {
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             lastScrollOffsetY = scrollView.contentOffset.y
-            lastReportedScrollDirection = nil
             beginSuppressingAutomaticSelectionScrolling(in: scrollView)
             keyboardTransitionOffset = nil
             keyboardTransitionWorkItem?.cancel()
@@ -325,12 +329,14 @@ struct ManuscriptTextEditor: UIViewRepresentable {
 
         func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
             if !decelerate {
+                flushPendingScrollDirection()
                 saveContentOffset(from: scrollView)
                 endSuppressingAutomaticSelectionScrolling(in: scrollView)
             }
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            flushPendingScrollDirection()
             saveContentOffset(from: scrollView)
             endSuppressingAutomaticSelectionScrolling(in: scrollView)
         }
@@ -352,8 +358,38 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         }
 
         private func reportScrollDirection(_ direction: ManuscriptTextEditorScrollDirection) {
-            guard lastReportedScrollDirection != direction else { return }
-            lastReportedScrollDirection = direction
+            guard lastDispatchedScrollDirection != direction || pendingScrollDirection != direction else { return }
+
+            pendingScrollDirection = direction
+            pendingScrollDirectionWorkItem?.cancel()
+
+            let elapsed = Date().timeIntervalSince(lastScrollDirectionDispatchDate)
+            guard elapsed < scrollDirectionThrottleInterval else {
+                dispatchPendingScrollDirection()
+                return
+            }
+
+            let delay = max(scrollDirectionThrottleInterval - elapsed, 0.04)
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.dispatchPendingScrollDirection()
+            }
+            pendingScrollDirectionWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
+
+        private func flushPendingScrollDirection() {
+            pendingScrollDirectionWorkItem?.cancel()
+            pendingScrollDirectionWorkItem = nil
+            dispatchPendingScrollDirection()
+        }
+
+        private func dispatchPendingScrollDirection() {
+            guard let direction = pendingScrollDirection else { return }
+            pendingScrollDirection = nil
+            pendingScrollDirectionWorkItem = nil
+            guard lastDispatchedScrollDirection != direction else { return }
+            lastDispatchedScrollDirection = direction
+            lastScrollDirectionDispatchDate = Date()
             parent.onScrollDirectionChange(direction)
         }
 

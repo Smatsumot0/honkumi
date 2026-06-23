@@ -147,7 +147,9 @@ nonisolated enum PrintTextNormalizer {
         normalized.publisherName = normalize(colophon.publisherName, location: nil).text
         normalized.authorName = normalize(colophon.authorName, location: nil).text
         normalized.circleName = normalize(colophon.circleName, location: nil).text
-        normalized.printerName = normalize(colophon.printerName, location: nil).text
+        if colophon.showsPrinterName {
+            normalized.printerName = normalize(colophon.printerName, location: nil).text
+        }
         normalized.websiteURL = normalize(colophon.websiteURL, location: nil).text
         normalized.xURL = normalize(colophon.xURL, location: nil).text
         normalized.pixivURL = normalize(colophon.pixivURL, location: nil).text
@@ -157,18 +159,21 @@ nonisolated enum PrintTextNormalizer {
     }
 
     private static func colophonTextFields(from colophon: ColophonSettings) -> [(label: String, value: String)] {
-        [
+        var fields: [(label: String, value: String)] = [
             ("作品名", colophon.workTitle),
             ("発行者", colophon.publisherName),
             ("作者", colophon.authorName),
             ("サークル", colophon.circleName),
-            ("印刷所", colophon.printerName),
             ("HP", colophon.websiteURL),
             ("x", colophon.xURL),
             ("pixiv", colophon.pixivURL),
             ("連絡先", colophon.contact),
             ("その他", colophon.notes)
         ]
+        if colophon.showsPrinterName {
+            fields.insert(("印刷所", colophon.printerName), at: 4)
+        }
+        return fields
     }
 
     private static func isHeart(_ character: Character) -> Bool {

@@ -351,7 +351,7 @@ nonisolated enum ManuscriptPaginator {
     }
 
     static func colophonEntries(from colophon: ColophonSettings) -> [ColophonEntry] {
-        [
+        var entries = [
             ColophonEntry(
                 id: "workTitle",
                 label: "",
@@ -379,18 +379,6 @@ nonisolated enum ManuscriptPaginator {
                 addsFollowingSpace: true
             ),
             ColophonEntry(
-                id: "publicationDate",
-                label: "発行日",
-                value: colophon.showsPublicationDate ? colophon.formattedPublicationDate : "",
-                addsFollowingSpace: false
-            ),
-            ColophonEntry(
-                id: "printer",
-                label: "印刷所",
-                value: colophon.showsPrinterName ? colophon.printerName : "",
-                addsFollowingSpace: true
-            ),
-            ColophonEntry(
                 id: "hp",
                 label: "HP",
                 value: (colophon.showsWebsiteURL || colophon.showsQRCode) ? colophon.websiteURL : "",
@@ -406,7 +394,30 @@ nonisolated enum ManuscriptPaginator {
                 addsPrecedingSpace: true,
                 addsFollowingSpace: false
             )
-        ].filter { entry in
+        ]
+
+        var activeWorkEntries: [ColophonEntry] = []
+        if colophon.showsPublicationDate {
+            activeWorkEntries.append(ColophonEntry(
+                id: "publicationDate",
+                label: "発行日",
+                value: colophon.formattedPublicationDate,
+                addsFollowingSpace: false
+            ))
+        }
+
+        if colophon.showsPrinterName {
+            activeWorkEntries.append(ColophonEntry(
+                id: "printer",
+                label: "印刷所",
+                value: colophon.printerName,
+                addsFollowingSpace: true
+            ))
+        }
+
+        entries.insert(contentsOf: activeWorkEntries, at: 4)
+
+        return entries.filter { entry in
             if entry.id == "creator" { return colophon.hasCreatorImage }
 
             return !entry.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -748,9 +759,18 @@ nonisolated struct TableOfContentsEntry: Equatable {
     let pageNumber: Int
 }
 
-nonisolated enum PreviewPDFKind: String, Equatable {
+nonisolated enum PreviewPDFKind: String, Equatable, Hashable {
     case normal
     case spread
+}
+
+nonisolated private struct PreviewPDFCacheKey: Hashable {
+    let documentID: UUID
+    let titleHash: UInt64
+    let bodyHash: UInt64
+    let settingsHash: UInt64
+    let subscriptionStatus: String
+    let kind: PreviewPDFKind
 }
 
 @MainActor
@@ -767,6 +787,11 @@ final class PreviewViewModel: ObservableObject {
     private var generation = 0
     private var isPreviewActive = false
     private var activePreviewKind: PreviewPDFKind = .normal
+    private var activeGenerationCacheKey: PreviewPDFCacheKey?
+    private var displayedPreviewCacheKey: PreviewPDFCacheKey?
+    private var previewPDFCache: [PreviewPDFCacheKey: URL] = [:]
+    private var previewPDFCacheAccessOrder: [PreviewPDFCacheKey] = []
+    private let previewPDFCacheLimit = 4
 
     init(documentStore: DocumentStore) {
         self.documentStore = documentStore
@@ -778,7 +803,7 @@ final class PreviewViewModel: ObservableObject {
                 let previewDocument = self.previewDocument(from: document)
                 self.document = previewDocument
                 if self.isPreviewActive {
-                    self.schedulePDFGeneration(
+                    self.preparePreview(
                         for: previewDocument,
                         kind: self.activePreviewKind,
                         debounceMilliseconds: 350
@@ -799,7 +824,7 @@ final class PreviewViewModel: ObservableObject {
                 let previewDocument = self.previewDocument(from: self.documentStore.document)
                 self.document = previewDocument
                 guard self.isPreviewActive else { return }
-                self.schedulePDFGeneration(
+                self.preparePreview(
                     for: previewDocument,
                     kind: self.activePreviewKind,
                     debounceMilliseconds: 0
@@ -830,20 +855,23 @@ final class PreviewViewModel: ObservableObject {
     }
 
     func preparePreviewIfNeeded(for kind: PreviewPDFKind = .normal) {
+        let previewDocument = previewDocument(from: documentStore.document)
+        document = previewDocument
+
         if activePreviewKind != kind {
             activePreviewKind = kind
             guard isPreviewActive else { return }
-            schedulePDFGeneration(
-                for: previewDocument(from: documentStore.document),
+            preparePreview(
+                for: previewDocument,
                 kind: kind,
                 debounceMilliseconds: 0
             )
             return
         }
 
-        guard isPreviewActive, !isGeneratingPDF, previewPDFURL == nil else { return }
-        schedulePDFGeneration(
-            for: previewDocument(from: documentStore.document),
+        guard isPreviewActive else { return }
+        preparePreview(
+            for: previewDocument,
             kind: kind,
             debounceMilliseconds: 0
         )
@@ -865,13 +893,55 @@ final class PreviewViewModel: ObservableObject {
             preparePreviewIfNeeded(for: kind)
         } else {
             cancelInactiveGeneration()
-            clearCurrentPreviewPDF()
         }
+    }
+
+    private func preparePreview(
+        for document: ManuscriptDocument,
+        kind: PreviewPDFKind,
+        debounceMilliseconds: UInt64
+    ) {
+        let subscriptionStatus = documentStore.subscriptionStatus
+        let cacheKey = Self.cacheKey(for: document, kind: kind, subscriptionStatus: subscriptionStatus)
+
+        if displayedPreviewCacheKey == cacheKey,
+           let previewPDFURL,
+           FileManager.default.fileExists(atPath: previewPDFURL.path) {
+            generationErrorMessage = nil
+            return
+        }
+
+        if displayedPreviewCacheKey == cacheKey {
+            previewPDFURL = nil
+            displayedPreviewCacheKey = nil
+        }
+
+        if let cachedURL = cachedPreviewPDFURL(for: cacheKey) {
+            generationTask?.cancel()
+            generationTask = nil
+            activeGenerationCacheKey = nil
+            previewPDFURL = cachedURL
+            displayedPreviewCacheKey = cacheKey
+            isGeneratingPDF = false
+            generationErrorMessage = nil
+            return
+        }
+
+        guard activeGenerationCacheKey != cacheKey || !isGeneratingPDF else { return }
+        schedulePDFGeneration(
+            for: document,
+            kind: kind,
+            subscriptionStatus: subscriptionStatus,
+            cacheKey: cacheKey,
+            debounceMilliseconds: debounceMilliseconds
+        )
     }
 
     private func schedulePDFGeneration(
         for document: ManuscriptDocument,
         kind: PreviewPDFKind,
+        subscriptionStatus: SubscriptionStatus,
+        cacheKey: PreviewPDFCacheKey,
         debounceMilliseconds: UInt64
     ) {
         generationTask?.cancel()
@@ -879,9 +949,8 @@ final class PreviewViewModel: ObservableObject {
         let generationID = generation
         let documentSnapshot = document
         let previewKind = kind
-        let subscriptionStatus = documentStore.subscriptionStatus
         let pdfExportService = pdfExportService
-        clearCurrentPreviewPDF()
+        activeGenerationCacheKey = cacheKey
         isGeneratingPDF = true
         generationErrorMessage = nil
 
@@ -906,7 +975,7 @@ final class PreviewViewModel: ObservableObject {
                 self?.applyGeneratedPDF(
                     at: outputURL,
                     generation: generationID,
-                    documentID: documentSnapshot.id,
+                    cacheKey: cacheKey,
                     kind: previewKind
                 )
             } catch is CancellationError {
@@ -916,7 +985,7 @@ final class PreviewViewModel: ObservableObject {
                 self?.applyGenerationError(
                     error,
                     generation: generationID,
-                    documentID: documentSnapshot.id,
+                    cacheKey: cacheKey,
                     kind: previewKind
                 )
             }
@@ -930,58 +999,152 @@ final class PreviewViewModel: ObservableObject {
     private func applyGeneratedPDF(
         at url: URL,
         generation: Int,
-        documentID: UUID,
+        cacheKey: PreviewPDFCacheKey,
         kind: PreviewPDFKind
     ) {
         guard self.generation == generation,
-              document.id == documentID,
               activePreviewKind == kind,
+              Self.cacheKey(
+                for: document,
+                kind: kind,
+                subscriptionStatus: documentStore.subscriptionStatus
+              ) == cacheKey,
               isPreviewActive else {
             cleanupPreviewPDF(at: url)
             return
         }
 
+        let previousURL = previewPDFURL
+        storeCachedPreviewPDF(url, for: cacheKey)
         previewPDFURL = url
+        displayedPreviewCacheKey = cacheKey
+        activeGenerationCacheKey = nil
         isGeneratingPDF = false
         generationErrorMessage = nil
+        cleanupPreviewPDF(at: previousURL)
     }
 
     private func applyGenerationError(
         _ error: Error,
         generation: Int,
-        documentID: UUID,
+        cacheKey: PreviewPDFCacheKey,
         kind: PreviewPDFKind
     ) {
         guard self.generation == generation,
-              document.id == documentID,
               activePreviewKind == kind,
+              Self.cacheKey(
+                for: document,
+                kind: kind,
+                subscriptionStatus: documentStore.subscriptionStatus
+              ) == cacheKey,
               isPreviewActive else { return }
+        activeGenerationCacheKey = nil
+        let previousURL = previewPDFURL
         previewPDFURL = nil
+        displayedPreviewCacheKey = nil
         isGeneratingPDF = false
         generationErrorMessage = error.localizedDescription
+        cleanupPreviewPDF(at: previousURL)
     }
 
     private func discardCancelledGeneration(generation: Int) {
         guard self.generation == generation else { return }
+        activeGenerationCacheKey = nil
         isGeneratingPDF = false
     }
 
     private func cancelInactiveGeneration() {
         generationTask?.cancel()
         generationTask = nil
+        activeGenerationCacheKey = nil
         isGeneratingPDF = false
-    }
-
-    private func clearCurrentPreviewPDF() {
-        let url = previewPDFURL
-        previewPDFURL = nil
-        generationErrorMessage = nil
-        cleanupPreviewPDF(at: url)
     }
 
     private func cleanupPreviewPDF(at url: URL?) {
         guard let url else { return }
+        guard !previewPDFCache.values.contains(url) else { return }
         try? FileManager.default.removeItem(at: url)
+    }
+
+    private func cachedPreviewPDFURL(for cacheKey: PreviewPDFCacheKey) -> URL? {
+        guard let url = previewPDFCache[cacheKey] else { return nil }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            removeCachedPreviewPDF(for: cacheKey)
+            return nil
+        }
+
+        touchCachedPreviewPDF(for: cacheKey)
+        return url
+    }
+
+    private func storeCachedPreviewPDF(_ url: URL, for cacheKey: PreviewPDFCacheKey) {
+        if let previousURL = previewPDFCache[cacheKey], previousURL != url {
+            try? FileManager.default.removeItem(at: previousURL)
+        }
+
+        previewPDFCache[cacheKey] = url
+        touchCachedPreviewPDF(for: cacheKey)
+        trimPreviewPDFCacheIfNeeded()
+    }
+
+    private func touchCachedPreviewPDF(for cacheKey: PreviewPDFCacheKey) {
+        previewPDFCacheAccessOrder.removeAll { $0 == cacheKey }
+        previewPDFCacheAccessOrder.append(cacheKey)
+    }
+
+    private func trimPreviewPDFCacheIfNeeded() {
+        while previewPDFCacheAccessOrder.count > previewPDFCacheLimit {
+            guard let evictionKey = previewPDFCacheAccessOrder.first(where: {
+                $0 != displayedPreviewCacheKey && $0 != activeGenerationCacheKey
+            }) else {
+                return
+            }
+            removeCachedPreviewPDF(for: evictionKey)
+        }
+    }
+
+    private func removeCachedPreviewPDF(for cacheKey: PreviewPDFCacheKey) {
+        previewPDFCacheAccessOrder.removeAll { $0 == cacheKey }
+        guard let url = previewPDFCache.removeValue(forKey: cacheKey) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static func cacheKey(
+        for document: ManuscriptDocument,
+        kind: PreviewPDFKind,
+        subscriptionStatus: SubscriptionStatus
+    ) -> PreviewPDFCacheKey {
+        PreviewPDFCacheKey(
+            documentID: document.id,
+            titleHash: stableHash(document.title),
+            bodyHash: stableHash(document.body),
+            settingsHash: stableHash(encodedSettingsData(from: document.settings.validated)),
+            subscriptionStatus: subscriptionStatus.rawValue,
+            kind: kind
+        )
+    }
+
+    private static func encodedSettingsData(from settings: EditorSettings) -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        if let data = try? encoder.encode(settings) {
+            return data
+        }
+
+        return Data(String(describing: settings).utf8)
+    }
+
+    private static func stableHash(_ string: String) -> UInt64 {
+        stableHash(Data(string.utf8))
+    }
+
+    private static func stableHash(_ data: Data) -> UInt64 {
+        var hash: UInt64 = 1_469_598_103_934_665_603
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash = hash &* 1_099_511_628_211
+        }
+        return hash
     }
 
     private static func validateGeneratedPDF(at url: URL) throws {

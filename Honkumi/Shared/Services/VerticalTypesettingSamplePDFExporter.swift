@@ -144,6 +144,8 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
             )
             document.body = colophonRegressionBody
             document.settings.showTableOfContents = false
+            document.settings.colophon.showsPublicationDate = testCase.showsPublicationDate
+            document.settings.colophon.showsPrinterName = testCase.showsPrinterName
             document.settings.colophon.printerName = testCase.printerName
 
             let publisherSettings = publisherSettings(from: testCase)
@@ -219,6 +221,18 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
                 showsWebsiteURL: false,
                 showsQRCode: false,
                 contact: "contact@example.com"
+            ),
+            ColophonRegressionCase(
+                title: "任意項目 OFF",
+                publisherName: "山田太郎",
+                authorName: "Honkumi確認用",
+                circleName: "サンプルサークル",
+                printerName: "非表示確認用印刷所",
+                showsWebsiteURL: false,
+                showsQRCode: false,
+                contact: "contact@example.com",
+                showsPublicationDate: false,
+                showsPrinterName: false
             ),
             ColophonRegressionCase(
                 title: "HP SNS メール long",
@@ -317,6 +331,8 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
         var pixivURL: String = ""
         var contact: String = ""
         var notes: String = ""
+        var showsPublicationDate: Bool = true
+        var showsPrinterName: Bool = true
     }
 
     private static let colophonRegressionBody = """
