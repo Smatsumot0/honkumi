@@ -65,6 +65,12 @@ nonisolated enum ManuscriptFormatter {
             label: "括弧の統一",
             description: "半角括弧 () を全角括弧 （） に変換します。",
             premium: true
+        ),
+        FormatRule(
+            id: \.enableRemovePeriodsBeforeClosingBrackets,
+            label: "閉じかっこ前の句点を削除",
+            description: "「こんにちは。」→「こんにちは」のように、閉じかっこ直前の句点を削除します。",
+            premium: true
         )
     ]
 
@@ -127,7 +133,33 @@ nonisolated enum ManuscriptFormatter {
             formatted = normalizeBrackets(formatted)
         }
 
+        if effectiveSettings.enableRemovePeriodsBeforeClosingBrackets {
+            formatted = removePeriodsBeforeClosingBrackets(formatted)
+        }
+
         return formatted
+    }
+
+    static func removePeriodsBeforeClosingBrackets(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: periodBeforeClosingBracketPattern,
+            with: "",
+            options: .regularExpression
+        )
+    }
+
+    static func firstPeriodBeforeClosingBracketRange(in text: String) -> Range<Int>? {
+        guard let regex = try? NSRegularExpression(pattern: periodBeforeClosingBracketPattern) else {
+            return nil
+        }
+
+        let nsText = text as NSString
+        let searchRange = NSRange(location: 0, length: nsText.length)
+        guard let match = regex.firstMatch(in: text, range: searchRange) else {
+            return nil
+        }
+
+        return match.range.location..<(match.range.location + match.range.length)
     }
 
     private static func trimLineSpaces(_ text: String) -> String {
@@ -242,4 +274,8 @@ nonisolated enum ManuscriptFormatter {
             .replacingOccurrences(of: "(", with: "（")
             .replacingOccurrences(of: ")", with: "）")
     }
+
+    private static let closingBracketsForPeriodRemoval = "」』）】〕］｝〉》〗〙"
+    private static let periodBeforeClosingBracketPattern =
+        "。(?=[\(NSRegularExpression.escapedPattern(for: closingBracketsForPeriodRemoval))])"
 }

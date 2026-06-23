@@ -4,6 +4,7 @@ import UIKit
 struct PreflightResultView: View {
     let result: PreflightResult
     let onReturnToFix: () -> Void
+    let onNavigateToIssue: (PreflightIssue) -> Void
     let onAutoFixAndContinue: () -> Void
     let onIgnoreWarningsAndContinue: () -> Void
 
@@ -11,38 +12,26 @@ struct PreflightResultView: View {
         result.issues.filter { $0.severity == .error || $0.severity == .warning }
     }
 
-    private var infoIssues: [PreflightIssue] {
-        result.issues.filter { $0.severity == .info }
-    }
-
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(result.hasProblems ? "修正が必要な項目があります" : "問題なし")
+                        Text(result.hasProblems ? "修正が必要な項目があります" : "入稿チェック完了")
                             .font(.headline)
-                        Text("エラー \(result.errorCount)件 / 警告 \(result.warningCount)件 / 自動修正可能 \(result.autoFixableIssues.count)件")
+                        Text(summaryText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
 
-                Section("問題リスト") {
+                Section(result.hasProblems ? "確認項目" : "結果") {
                     if problemIssues.isEmpty {
-                        Text("エラーと警告はありません")
+                        Text("警告はありません。このままPDF出力へ進めます。")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(problemIssues) { issue in
-                            issueRow(issue)
-                        }
-                    }
-                }
-
-                if !infoIssues.isEmpty {
-                    Section("情報") {
-                        ForEach(infoIssues) { issue in
                             issueRow(issue)
                         }
                     }
@@ -58,38 +47,57 @@ struct PreflightResultView: View {
 
     private var actionFooter: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
+            if result.hasProblems {
+                HStack(spacing: 10) {
+                    Button {
+                        onReturnToFix()
+                    } label: {
+                        Text("戻って修正")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
+                    if !result.autoFixableIssues.isEmpty {
+                        Button {
+                            onAutoFixAndContinue()
+                        } label: {
+                            Text("自動修正")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+
                 Button {
-                    onReturnToFix()
+                    onIgnoreWarningsAndContinue()
                 } label: {
-                    Text("戻って修正")
+                    Text("警告を無視して続行")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-
+                .disabled(!result.canContinue)
+            } else {
                 Button {
-                    onAutoFixAndContinue()
+                    onIgnoreWarningsAndContinue()
                 } label: {
-                    Text("自動修正")
+                    Text("PDF出力へ進む")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(result.autoFixableIssues.isEmpty)
             }
-
-            Button {
-                onIgnoreWarningsAndContinue()
-            } label: {
-                Text("警告を無視して続行")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!result.canContinue)
         }
         .padding(.horizontal)
         .padding(.top, 10)
         .padding(.bottom, 8)
         .background(.bar)
+    }
+
+    private var summaryText: String {
+        if result.hasProblems {
+            return "エラー \(result.errorCount)件 / 警告 \(result.warningCount)件 / 自動修正可能 \(result.autoFixableIssues.count)件"
+        }
+
+        return "修正が必要な項目はありません。"
     }
 
     private func issueRow(_ issue: PreflightIssue) -> some View {
@@ -111,7 +119,7 @@ struct PreflightResultView: View {
                 .foregroundStyle(.secondary)
 
             if let locationDescription = locationDescription(issue.location) {
-                Text(locationDescription)
+                Text("対象範囲: \(locationDescription)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -124,6 +132,16 @@ struct PreflightResultView: View {
                 Label("手動で確認してください", systemImage: "hand.point.up.left")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if canNavigate(to: issue) {
+                Button {
+                    onNavigateToIssue(issue)
+                } label: {
+                    Label("該当箇所へ移動", systemImage: "arrow.turn.down.right")
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
             }
         }
         .padding(.vertical, 4)
@@ -150,11 +168,11 @@ struct PreflightResultView: View {
         case .settings:
             parts.append("設定")
         case .page:
-            parts.append("ページ")
+            parts.append("本文")
         case .colophon:
             parts.append("奥付")
         case .toc:
-            parts.append("目次")
+            parts.append("設定")
         case .pdf:
             parts.append("PDF")
         }
@@ -163,7 +181,21 @@ struct PreflightResultView: View {
             parts.append("\(pageNumber)ページ")
         }
 
+        if location.type == .text, let characterRange = location.characterRange {
+            parts.append("本文\(characterRange.lowerBound + 1)文字目付近")
+        }
+
         return parts.isEmpty ? nil : parts.joined(separator: " / ")
+    }
+
+    private func canNavigate(to issue: PreflightIssue) -> Bool {
+        guard let location = issue.location,
+              location.type == .text,
+              location.characterRange != nil else {
+            return false
+        }
+
+        return true
     }
 }
 

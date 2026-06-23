@@ -330,6 +330,7 @@ nonisolated struct FormatSettings: Codable, Equatable {
     var enableSpaceAfterExclamationQuestion: Bool
     var enableNormalizePunctuation: Bool
     var enableNormalizeBrackets: Bool
+    var enableRemovePeriodsBeforeClosingBrackets: Bool
 
     static let `default` = FormatSettings(
         enableAutoFormat: false,
@@ -344,7 +345,8 @@ nonisolated struct FormatSettings: Codable, Equatable {
         enableNormalizeDash: false,
         enableSpaceAfterExclamationQuestion: false,
         enableNormalizePunctuation: false,
-        enableNormalizeBrackets: false
+        enableNormalizeBrackets: false,
+        enableRemovePeriodsBeforeClosingBrackets: false
     )
 
     var validated: FormatSettings {
@@ -375,6 +377,7 @@ nonisolated extension FormatSettings {
         case enableSpaceAfterExclamationQuestion
         case enableNormalizePunctuation
         case enableNormalizeBrackets
+        case enableRemovePeriodsBeforeClosingBrackets
     }
 
     init(from decoder: Decoder) throws {
@@ -394,7 +397,8 @@ nonisolated extension FormatSettings {
             enableNormalizeDash: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeDash) ?? defaults.enableNormalizeDash,
             enableSpaceAfterExclamationQuestion: try container.decodeIfPresent(Bool.self, forKey: .enableSpaceAfterExclamationQuestion) ?? defaults.enableSpaceAfterExclamationQuestion,
             enableNormalizePunctuation: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizePunctuation) ?? defaults.enableNormalizePunctuation,
-            enableNormalizeBrackets: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeBrackets) ?? defaults.enableNormalizeBrackets
+            enableNormalizeBrackets: try container.decodeIfPresent(Bool.self, forKey: .enableNormalizeBrackets) ?? defaults.enableNormalizeBrackets,
+            enableRemovePeriodsBeforeClosingBrackets: try container.decodeIfPresent(Bool.self, forKey: .enableRemovePeriodsBeforeClosingBrackets) ?? defaults.enableRemovePeriodsBeforeClosingBrackets
         )
     }
 }

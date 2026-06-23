@@ -3,9 +3,9 @@ import SwiftUI
 struct EditorView: View {
     @StateObject var viewModel: EditorViewModel
     @Binding var scrollOffset: CGPoint
+    @Binding var requestedSelectedRange: NSRange?
     @Binding var isEditorChromeVisible: Bool
     @State private var selectedRange = NSRange(location: 0, length: 0)
-    @State private var requestedSelectedRange: NSRange?
     @State private var isBodyEditorActive = false
     @State private var editorCommand: ManuscriptTextEditorCommand?
     @State private var showsSearchReplaceSheet = false
@@ -283,12 +283,16 @@ struct EditorView: View {
     }
 
     private func handleScrollDirection(_ direction: ManuscriptTextEditorScrollDirection) {
+        let shouldShowChrome: Bool
         switch direction {
         case .up:
-            isEditorChromeVisible = true
+            shouldShowChrome = true
         case .down:
-            isEditorChromeVisible = false
+            shouldShowChrome = false
         }
+
+        guard isEditorChromeVisible != shouldShowChrome else { return }
+        isEditorChromeVisible = shouldShowChrome
     }
 
     private func moveUp() {

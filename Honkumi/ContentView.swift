@@ -74,6 +74,7 @@ private struct WorkspaceView: View {
     @StateObject private var previewViewModel: PreviewViewModel
     @State private var selectedSection: AppSection = .editor
     @State private var editorScrollOffset: CGPoint = .zero
+    @State private var editorRequestedSelectedRange: NSRange?
     @State private var isEditorChromeVisible = true
     @State private var preflightResult: PreflightResult?
     @State private var exportedPDF: ExportedPDF?
@@ -112,6 +113,7 @@ private struct WorkspaceView: View {
                     EditorView(
                         viewModel: editorViewModel,
                         scrollOffset: $editorScrollOffset,
+                        requestedSelectedRange: $editorRequestedSelectedRange,
                         isEditorChromeVisible: $isEditorChromeVisible
                     )
                 case .preview:
@@ -159,6 +161,9 @@ private struct WorkspaceView: View {
                     preflightResult = result
                     selectedSection = .editor
                     preflightResult = nil
+                },
+                onNavigateToIssue: { issue in
+                    navigateToIssue(issue)
                 },
                 onAutoFixAndContinue: {
                     autoFixAndContinue()
@@ -275,6 +280,21 @@ private struct WorkspaceView: View {
             preflightResult = nil
             exportPDF(document: fixedDocument)
         }
+    }
+
+    private func navigateToIssue(_ issue: PreflightIssue) {
+        guard let location = issue.location,
+              location.type == .text,
+              let characterRange = location.characterRange else {
+            return
+        }
+
+        selectedSection = .editor
+        editorRequestedSelectedRange = NSRange(
+            location: max(characterRange.lowerBound, 0),
+            length: max(characterRange.count, 0)
+        )
+        preflightResult = nil
     }
 
     private func exportPDF(document: ManuscriptDocument? = nil, isAlreadyExporting: Bool = false) {
