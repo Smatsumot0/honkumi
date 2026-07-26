@@ -171,6 +171,8 @@ DebugおよびStagingはGoogle公式テストIDと`ADS_TEST_MODE`を維持する
 
 通常起動やReleaseへ影響しないDebug専用環境変数で、次のPDF群を明示的に生成できるようにする。
 
+各環境変数は単独で有効にでき、指定したサンプル群だけを生成する。既存の`HONKUMI_EXPORT_VERTICAL_TYPESETTING_SAMPLES`を同時に指定する必要はない。
+
 ### 11.1 推奨設定サンプル
 
 `HONKUMI_EXPORT_RECOMMENDED_SETTING_SAMPLES=1`で、A6・新書・B6と次の5ページ数帯の全組合せを出力する。
@@ -274,3 +276,14 @@ DebugおよびStagingはGoogle公式テストIDと`ADS_TEST_MODE`を維持する
 - 大きな原稿の設定変更中にプレビューPDFが連続生成されない。
 - PDFタイムアウト後に出力ボタンが利用可能になり、再試行できる。
 - ReleaseのInfo.plistへ本番AdMob IDが入り、Debug・Stagingへ本番IDが入らない。
+
+## 15. 実装単位
+
+実装とレビューは次の独立した単位に分ける。各単位で対象テストを先に追加し、単独でビルド可能な状態にしてから次へ進む。
+
+1. エディタ最下移動
+2. 設定中のプレビュー抑制、用紙選択、推奨値引継ぎ
+3. 章タイトル見開きレイアウトとプリフライト
+4. PDF生成タイムアウトと絵文字代替表示
+5. UMP、Release AdMob設定、作品別広告インターバル
+6. Debug検証用PDFと全体回帰確認
