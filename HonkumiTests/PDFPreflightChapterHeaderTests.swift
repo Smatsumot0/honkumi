@@ -66,6 +66,21 @@ final class PDFPreflightChapterHeaderTests: XCTestCase {
         XCTAssertFalse(result.canContinue)
     }
 
+    func testOneLongChapterAcrossManyPagesProducesOneHeaderIssue() {
+        let title = makeTitle(exceedingBodyWidths: 1)
+        let document = makeDocument(title: title, bodyCharacterCount: 2_000)
+
+        let result = PDFPreflightService().check(
+            document: document,
+            subscriptionStatus: .free
+        )
+        let chapterIssues = result.issues.filter {
+            $0.id.hasPrefix("pdf.chapterHeader.")
+        }
+
+        XCTAssertEqual(chapterIssues.count, 1)
+    }
+
     private func makeDocument(title: String, bodyCharacterCount: Int) -> ManuscriptDocument {
         ManuscriptDocument(
             title: "Chapter Header",

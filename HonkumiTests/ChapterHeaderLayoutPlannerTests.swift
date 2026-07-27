@@ -110,7 +110,14 @@ final class ChapterHeaderLayoutPlannerTests: XCTestCase {
         XCTAssertEqual((left?.text ?? "") + (right?.text ?? ""), title)
         XCTAssertEqual(left?.alignment, .trailing)
         XCTAssertEqual(right?.alignment, .leading)
-        XCTAssertEqual(plan.issues, [.spread(title: title, pageNumbers: [3, 2])])
+        XCTAssertEqual(plan.issues, [
+            ChapterHeaderLayoutIssue(
+                chapterIndex: 0,
+                kind: .spread,
+                title: title,
+                pageNumbers: [3, 2]
+            )
+        ])
     }
 
     func testTitleThatExceedsBothPagesCreatesOverflowWithoutFragments() {
@@ -131,7 +138,14 @@ final class ChapterHeaderLayoutPlannerTests: XCTestCase {
         )
 
         XCTAssertTrue(plan.fragmentsByPageID.isEmpty)
-        XCTAssertEqual(plan.issues, [.overflow(title: title, pageNumbers: [3, 2])])
+        XCTAssertEqual(plan.issues, [
+            ChapterHeaderLayoutIssue(
+                chapterIndex: 0,
+                kind: .overflow,
+                title: title,
+                pageNumbers: [3, 2]
+            )
+        ])
     }
 
     func testMissingCompanionPageCreatesOverflow() {
@@ -146,7 +160,14 @@ final class ChapterHeaderLayoutPlannerTests: XCTestCase {
         )
 
         XCTAssertTrue(plan.fragmentsByPageID.isEmpty)
-        XCTAssertEqual(plan.issues, [.overflow(title: title, pageNumbers: [1])])
+        XCTAssertEqual(plan.issues, [
+            ChapterHeaderLayoutIssue(
+                chapterIndex: 0,
+                kind: .overflow,
+                title: title,
+                pageNumbers: [1]
+            )
+        ])
     }
 
     func testChapterStartingOnCompanionPageCannotContinuePreviousTitle() {
@@ -167,7 +188,55 @@ final class ChapterHeaderLayoutPlannerTests: XCTestCase {
         )
 
         XCTAssertTrue(plan.fragmentsByPageID.isEmpty)
-        XCTAssertEqual(plan.issues, [.overflow(title: title, pageNumbers: [3, 2])])
+        XCTAssertEqual(plan.issues, [
+            ChapterHeaderLayoutIssue(
+                chapterIndex: 0,
+                kind: .overflow,
+                title: title,
+                pageNumbers: [3, 2]
+            )
+        ])
+    }
+
+    func testOverflowReplacesSpreadForSameChapterOccurrence() {
+        let width = pageBodyWidth
+        let title = String(repeating: "A", count: Int(width) + 10)
+        let pages = [
+            bodyPage(title: title, startsTitle: true),
+            bodyPage(title: title),
+            bodyPage(title: title),
+            bodyPage(title: title)
+        ]
+
+        let plan = ChapterHeaderLayoutPlanner.makePlan(
+            pages: pages,
+            settings: chapterSettings,
+            subscriptionStatus: .free,
+            measureWidth: measure
+        )
+
+        XCTAssertEqual(plan.issues.count, 1)
+        XCTAssertEqual(plan.issues.first?.chapterIndex, 0)
+        XCTAssertEqual(plan.issues.first?.kind, .overflow)
+    }
+
+    func testSameTitleInSeparateChapterOccurrencesKeepsTwoIssues() {
+        let title = String(repeating: "A", count: Int(pageBodyWidth) + 1)
+        let pages = [
+            bodyPage(title: title, startsTitle: true),
+            bodyPage(title: title),
+            bodyPage(title: title, startsTitle: true),
+            bodyPage(title: title)
+        ]
+
+        let plan = ChapterHeaderLayoutPlanner.makePlan(
+            pages: pages,
+            settings: chapterSettings,
+            subscriptionStatus: .free,
+            measureWidth: measure
+        )
+
+        XCTAssertEqual(plan.issues.map(\.chapterIndex), [0, 1])
     }
 
     private var chapterSettings: EditorSettings {

@@ -14,13 +14,16 @@ final class ChapterHeaderPDFRenderingTests: XCTestCase {
             settings: pagination.document.settings,
             subscriptionStatus: .free
         )
-        guard case let .spread(title, _) = try XCTUnwrap(plan.issues.first) else {
-            return XCTFail("Expected a spread chapter title")
-        }
+        let issue = try XCTUnwrap(plan.issues.first)
+        let title = issue.title
         let fragments = pagination.pages.enumerated().compactMap { index, page in
             plan.fragmentsByPageID[page.id].map { (index, $0) }
         }
         XCTAssertEqual(fragments.count, 2)
+        let recombinedTitle =
+            (fragments.first { $0.1.alignment == .trailing }?.1.text ?? "")
+            + (fragments.first { $0.1.alignment == .leading }?.1.text ?? "")
+        XCTAssertEqual(recombinedTitle, title)
 
         let exporter = PDFExportService()
         let normalURL = try await exporter.export(document: document, subscriptionStatus: .free)

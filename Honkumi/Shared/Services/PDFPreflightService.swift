@@ -477,53 +477,35 @@ nonisolated struct PDFPreflightService {
             subscriptionStatus: subscriptionStatus
         )
 
-        for (index, issue) in plan.issues.enumerated() {
-            switch issue {
-            case let .spread(title, pageNumbers):
-                let pageNumbersText = pageNumbers.map(String.init).joined(separator: "・")
+        for issue in plan.issues {
+            let pageNumbersText = issue.pageNumbers.map(String.init).joined(separator: "・")
+            switch issue.kind {
+            case .spread:
                 issues.append(warning(
-                    id: chapterHeaderIssueID(
-                        kind: "spread",
-                        pageNumbers: pageNumbers,
-                        index: index
-                    ),
+                    id: "pdf.chapterHeader.spread.chapter.\(issue.chapterIndex)",
                     title: "章タイトルが見開きにまたがります",
-                    message: "「\(title)」を見開き \(pageNumbersText) ページに分けて表示します。",
+                    message: "「\(issue.title)」を見開き \(pageNumbersText) ページに分けて表示します。",
                     location: .init(
                         type: .page,
-                        pageNumber: pageNumbers.first,
+                        pageNumber: issue.pageNumbers.first,
                         characterRange: nil,
                         settingKey: "showChapterTitle"
                     )
                 ))
-            case let .overflow(title, pageNumbers):
-                let pageNumbersText = pageNumbers.map(String.init).joined(separator: "・")
+            case .overflow:
                 issues.append(error(
-                    id: chapterHeaderIssueID(
-                        kind: "overflow",
-                        pageNumbers: pageNumbers,
-                        index: index
-                    ),
+                    id: "pdf.chapterHeader.overflow.chapter.\(issue.chapterIndex)",
                     title: "章タイトルが見開きに収まりません",
-                    message: "「\(title)」は見開き \(pageNumbersText) ページの上部に収まりません。章タイトルを短くしてください。",
+                    message: "「\(issue.title)」は見開き \(pageNumbersText) ページの上部に収まりません。章タイトルを短くしてください。",
                     location: .init(
                         type: .page,
-                        pageNumber: pageNumbers.first,
+                        pageNumber: issue.pageNumbers.first,
                         characterRange: nil,
                         settingKey: "showChapterTitle"
                     )
                 ))
             }
         }
-    }
-
-    private func chapterHeaderIssueID(
-        kind: String,
-        pageNumbers: [Int],
-        index: Int
-    ) -> String {
-        let pages = pageNumbers.map(String.init).joined(separator: "-")
-        return "pdf.chapterHeader.\(kind).\(pages).\(index)"
     }
 
     private func checkRecommendedSettingsConformance(

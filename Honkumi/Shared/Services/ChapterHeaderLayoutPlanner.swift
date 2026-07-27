@@ -18,9 +18,16 @@ nonisolated struct ChapterHeaderFragment: Equatable {
     let alignment: ChapterHeaderHorizontalAlignment
 }
 
-nonisolated enum ChapterHeaderLayoutIssue: Equatable {
-    case spread(title: String, pageNumbers: [Int])
-    case overflow(title: String, pageNumbers: [Int])
+nonisolated enum ChapterHeaderLayoutIssueKind: Equatable {
+    case spread
+    case overflow
+}
+
+nonisolated struct ChapterHeaderLayoutIssue: Equatable {
+    let chapterIndex: Int
+    let kind: ChapterHeaderLayoutIssueKind
+    let title: String
+    let pageNumbers: [Int]
 }
 
 nonisolated struct ChapterHeaderLayoutPlan: Equatable {
@@ -36,6 +43,7 @@ nonisolated enum ChapterHeaderLayoutPlanner {
         let physicalPageNumber: Int
         let layout: PageLayout
         let title: String?
+        let chapterIndex: Int?
     }
 
     static func split(
@@ -82,13 +90,32 @@ nonisolated enum ChapterHeaderLayoutPlanner {
             forPageCount: pages.count,
             settings: settings
         )
+        var nextChapterIndex = 0
+        var activeChapterIndex: Int?
+        var activeChapterTitle: String?
         let candidates = zip(pages, physicalPageNumbers).map { page, pageNumber in
+            if !page.chapterTitlesStartingOnPage.isEmpty {
+                for title in page.chapterTitlesStartingOnPage {
+                    activeChapterIndex = nextChapterIndex
+                    activeChapterTitle = normalizedTitle(title)
+                    nextChapterIndex += 1
+                }
+            } else if page.kind == .body,
+                      let pageChapterTitle = page.chapterTitle.flatMap(normalizedTitle),
+                      activeChapterIndex == nil || activeChapterTitle != pageChapterTitle {
+                activeChapterIndex = nextChapterIndex
+                activeChapterTitle = pageChapterTitle
+                nextChapterIndex += 1
+            }
+
             let layout = LayoutCalculator.layout(for: settings, pageNumber: pageNumber)
+            let title = eligibleTitle(on: page, settings: settings)
             return PageCandidate(
                 page: page,
                 physicalPageNumber: pageNumber,
                 layout: layout,
-                title: eligibleTitle(on: page, settings: settings)
+                title: title,
+                chapterIndex: title == nil ? nil : activeChapterIndex
             )
         }
         let candidatesByPageNumber = Dictionary(
@@ -99,7 +126,7 @@ nonisolated enum ChapterHeaderLayoutPlanner {
         }).sorted()
 
         var fragments: [UUID: ChapterHeaderFragment] = [:]
-        var issues: [ChapterHeaderLayoutIssue] = []
+        var issuesByChapter: [Int: ChapterHeaderLayoutIssue] = [:]
 
         for leftPageNumber in spreadLeftPageNumbers {
             let left = candidatesByPageNumber[leftPageNumber]
@@ -109,7 +136,9 @@ nonisolated enum ChapterHeaderLayoutPlanner {
             if let left,
                let right,
                let leftTitle = left.title,
-               leftTitle == right.title {
+               leftTitle == right.title,
+               let chapterIndex = left.chapterIndex,
+               chapterIndex == right.chapterIndex {
                 let font = font(for: left.layout, subscriptionStatus: subscriptionStatus)
                 switch split(
                     title: leftTitle,
@@ -132,27 +161,56 @@ nonisolated enum ChapterHeaderLayoutPlanner {
                         text: second,
                         alignment: .leading
                     )
-                    issues.append(.spread(title: leftTitle, pageNumbers: pageNumbers))
+                    record(
+                        ChapterHeaderLayoutIssue(
+                            chapterIndex: chapterIndex,
+                            kind: .spread,
+                            title: leftTitle,
+                            pageNumbers: pageNumbers
+                        ),
+                        in: &issuesByChapter
+                    )
                 case .overflow:
-                    issues.append(.overflow(title: leftTitle, pageNumbers: pageNumbers))
+                    record(
+                        ChapterHeaderLayoutIssue(
+                            chapterIndex: chapterIndex,
+                            kind: .overflow,
+                            title: leftTitle,
+                            pageNumbers: pageNumbers
+                        ),
+                        in: &issuesByChapter
+                    )
                 }
                 continue
             }
 
             for candidate in [left, right].compactMap({ $0 }) {
-                guard let title = candidate.title else { continue }
+                guard let title = candidate.title,
+                      let chapterIndex = candidate.chapterIndex else {
+                    continue
+                }
                 let font = font(for: candidate.layout, subscriptionStatus: subscriptionStatus)
                 if measureWidth(title, font) <= candidate.layout.bodyFrame.width {
                     fragments[candidate.page.id] = singleFragment(for: candidate, title: title)
                 } else {
-                    issues.append(.overflow(title: title, pageNumbers: pageNumbers))
+                    record(
+                        ChapterHeaderLayoutIssue(
+                            chapterIndex: chapterIndex,
+                            kind: .overflow,
+                            title: title,
+                            pageNumbers: pageNumbers
+                        ),
+                        in: &issuesByChapter
+                    )
                 }
             }
         }
 
         return ChapterHeaderLayoutPlan(
             fragmentsByPageID: fragments,
-            issues: issues
+            issues: issuesByChapter.values.sorted {
+                $0.chapterIndex < $1.chapterIndex
+            }
         )
     }
 
@@ -179,8 +237,26 @@ nonisolated enum ChapterHeaderLayoutPlanner {
             return nil
         }
 
+        return normalizedTitle(title)
+    }
+
+    private static func normalizedTitle(_ title: String) -> String? {
         let normalized = PrintTextNormalizer.normalize(title, location: .title).text
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func record(
+        _ issue: ChapterHeaderLayoutIssue,
+        in issuesByChapter: inout [Int: ChapterHeaderLayoutIssue]
+    ) {
+        guard let existing = issuesByChapter[issue.chapterIndex] else {
+            issuesByChapter[issue.chapterIndex] = issue
+            return
+        }
+        guard existing.kind != .overflow, issue.kind == .overflow else {
+            return
+        }
+        issuesByChapter[issue.chapterIndex] = issue
     }
 
     private static func spreadLeftPageNumber(containing physicalPageNumber: Int) -> Int {
