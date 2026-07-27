@@ -5,6 +5,13 @@ enum SettingsInitialTab {
     case print
 }
 
+nonisolated enum PrintMarginDisplayLabel {
+    static let top = "天"
+    static let bottom = "地"
+    static let outer = "小口"
+    static let inner = "ノド"
+}
+
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
     @ObservedObject var proStore: HonkumiProStore
@@ -71,6 +78,10 @@ struct SettingsView: View {
                     get: { viewModel.settings.pageSize },
                     set: { viewModel.updatePageSize($0) }
                 )) {
+                    if viewModel.settings.pageSize.isLegacySelection {
+                        Text("\(viewModel.settings.pageSize.displayName)（既存データ）")
+                            .tag(viewModel.settings.pageSize)
+                    }
                     ForEach(PageSize.selectableCases) { pageSize in
                         Text(pageSize.displayName).tag(pageSize)
                     }
@@ -179,10 +190,10 @@ struct SettingsView: View {
                 }
 
                 if usesRecommendedMargins {
-                    readOnlySettingRow(title: "天余白", value: formattedMillimeterValue(printSettings.marginTop))
-                    readOnlySettingRow(title: "地余白", value: formattedMillimeterValue(printSettings.marginBottom))
-                    readOnlySettingRow(title: "小口余白", value: formattedMillimeterValue(printSettings.marginOuter))
-                    readOnlySettingRow(title: "ノド余白", value: formattedMillimeterValue(printSettings.marginInner))
+                    readOnlySettingRow(title: PrintMarginDisplayLabel.top, value: formattedMillimeterValue(printSettings.marginTop))
+                    readOnlySettingRow(title: PrintMarginDisplayLabel.bottom, value: formattedMillimeterValue(printSettings.marginBottom))
+                    readOnlySettingRow(title: PrintMarginDisplayLabel.outer, value: formattedMillimeterValue(printSettings.marginOuter))
+                    readOnlySettingRow(title: PrintMarginDisplayLabel.inner, value: formattedMillimeterValue(printSettings.marginInner))
 
                     if viewModel.showsWideGutterRecommendationNote {
                         Text(viewModel.wideGutterRecommendationNote)
@@ -191,7 +202,7 @@ struct SettingsView: View {
                     }
                 } else {
                     valueStepper(
-                        title: "天余白",
+                        title: PrintMarginDisplayLabel.top,
                         value: printSettings.marginTop,
                         range: EditorSettings.marginTopRange,
                         step: 1,
@@ -199,7 +210,7 @@ struct SettingsView: View {
                         update: viewModel.updateMarginTop
                     )
                     valueStepper(
-                        title: "地余白",
+                        title: PrintMarginDisplayLabel.bottom,
                         value: printSettings.marginBottom,
                         range: EditorSettings.marginBottomRange,
                         step: 1,
@@ -207,7 +218,7 @@ struct SettingsView: View {
                         update: viewModel.updateMarginBottom
                     )
                     valueStepper(
-                        title: "小口",
+                        title: PrintMarginDisplayLabel.outer,
                         value: printSettings.marginOuter,
                         range: EditorSettings.marginOuterRange,
                         step: 1,
@@ -215,7 +226,7 @@ struct SettingsView: View {
                         update: viewModel.updateMarginOuter
                     )
                     valueStepper(
-                        title: "ノド",
+                        title: PrintMarginDisplayLabel.inner,
                         value: printSettings.marginInner,
                         range: EditorSettings.marginInnerRange,
                         step: 1,
@@ -275,6 +286,18 @@ struct SettingsView: View {
                     get: { viewModel.settings.isPageNumberEnabled },
                     set: { viewModel.updateIsPageNumberEnabled($0) }
                 ))
+
+                Toggle("目次にノンブルを表示する", isOn: Binding(
+                    get: { viewModel.settings.showPageNumberOnToc },
+                    set: { viewModel.updateShowPageNumberOnToc($0) }
+                ))
+                .disabled(!viewModel.settings.isPageNumberEnabled)
+
+                Toggle("奥付にノンブルを表示する", isOn: Binding(
+                    get: { viewModel.settings.showPageNumberOnColophon },
+                    set: { viewModel.updateShowPageNumberOnColophon($0) }
+                ))
+                .disabled(!viewModel.settings.isPageNumberEnabled)
 
                 intStepper(
                     title: "開始番号",

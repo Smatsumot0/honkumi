@@ -110,40 +110,27 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func updateUseRecommendedTypography(_ value: Bool) {
+        let displayed = printSettingsForDisplay
         var updated = settings
         if updated.useRecommendedTypography,
            !value,
-           Self.hasDefaultManualTypographyFields(updated) {
-            updated = Self.copyManualTypographyFields(from: printSettingsForDisplay, to: updated)
+           isPrintRecommendationAvailable {
+            updated = Self.copyManualTypographyFields(from: displayed, to: updated)
         }
         updated.useRecommendedTypography = value
         settings = updated
     }
 
     func updateUseRecommendedMargins(_ value: Bool) {
+        let displayed = printSettingsForDisplay
         var updated = settings
         if updated.useRecommendedMargins,
            !value,
-           Self.hasDefaultManualMarginFields(updated) {
-            updated = Self.copyManualMarginFields(from: printSettingsForDisplay, to: updated)
+           isPrintRecommendationAvailable {
+            updated = Self.copyManualMarginFields(from: displayed, to: updated)
         }
         updated.useRecommendedMargins = value
         settings = updated
-    }
-
-    private static func hasDefaultManualTypographyFields(_ settings: EditorSettings) -> Bool {
-        let defaults = EditorSettings.default
-        return settings.fontSize == defaults.fontSize
-            && settings.charactersPerLine == defaults.charactersPerLine
-            && settings.linesPerPage == defaults.linesPerPage
-    }
-
-    private static func hasDefaultManualMarginFields(_ settings: EditorSettings) -> Bool {
-        let defaults = EditorSettings.default
-        return settings.marginTop == defaults.marginTop
-            && settings.marginBottom == defaults.marginBottom
-            && settings.marginInner == defaults.marginInner
-            && settings.marginOuter == defaults.marginOuter
     }
 
     private static func copyManualTypographyFields(
@@ -298,6 +285,18 @@ final class SettingsViewModel: ObservableObject {
         if value, updated.pageNumberPosition == .hidden {
             updated.pageNumberPosition = .outside
         }
+        settings = updated
+    }
+
+    func updateShowPageNumberOnToc(_ value: Bool) {
+        var updated = settings
+        updated.showPageNumberOnToc = value
+        settings = updated
+    }
+
+    func updateShowPageNumberOnColophon(_ value: Bool) {
+        var updated = settings
+        updated.showPageNumberOnColophon = value
         settings = updated
     }
 

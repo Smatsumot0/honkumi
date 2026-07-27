@@ -65,9 +65,10 @@ struct HonkumiProPurchaseMessage: Identifiable, Equatable {
 
 @MainActor
 final class HonkumiProStore: ObservableObject {
-    static let productID = "honkumi.pro"
+    static let productID = "app.honkumi.pro"
 
     @Published private(set) var product: Product?
+    @Published private(set) var entitlementState: ProEntitlementState = .unknown
     @Published private(set) var isProUnlocked = false
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var isPurchasing = false
@@ -138,7 +139,7 @@ final class HonkumiProStore: ObservableObject {
             }
         }
 
-        isProUnlocked = unlocked
+        setEntitlementState(unlocked ? .pro : .free)
     }
 
     func purchase() async {
@@ -164,7 +165,7 @@ final class HonkumiProStore: ObservableObject {
 
                     await transaction.finish()
                     await refreshPurchasedStatus()
-                    isProUnlocked = true
+                    setEntitlementState(.pro)
                     purchaseMessage = HonkumiProPurchaseMessage(
                         title: "購入が完了しました",
                         body: "Honkumi Proの機能を利用できます。"
@@ -250,6 +251,11 @@ final class HonkumiProStore: ObservableObject {
                 body: "Honkumi Proの取引更新を検証できませんでした。"
             )
         }
+    }
+
+    private func setEntitlementState(_ state: ProEntitlementState) {
+        entitlementState = state
+        isProUnlocked = state.isProUnlocked
     }
 }
 

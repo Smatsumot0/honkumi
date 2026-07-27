@@ -59,14 +59,37 @@ nonisolated enum ManuscriptRenderPipeline {
         subscriptionStatus: SubscriptionStatus
     ) -> ManuscriptDocument {
         let settings = RecommendedPrintSettings.effectiveSettings(for: document)
-        var preparedDocument = document
-        preparedDocument.settings = settings
-        preparedDocument.body = ManuscriptFormatter.formatManuscriptText(
-            document.body,
-            settings: settings.formatSettings,
-            options: FormatOptions(isPremiumUser: subscriptionStatus == .paid)
+        var preparedDocument = documentPreparedForPagination(
+            from: document,
+            settings: settings,
+            subscriptionStatus: subscriptionStatus
         )
-        return PrintTextNormalizer.normalizedDocument(preparedDocument)
+
+        guard settings.useRecommendedTypography || settings.useRecommendedMargins,
+              RecommendedPrintSettings.supportsRecommendations(for: settings.pageSize) else {
+            return preparedDocument
+        }
+
+        for _ in 0..<2 {
+            let estimatedPageCount = RecommendedPrintSettings.estimatedPageCount(
+                body: preparedDocument.body,
+                settings: preparedDocument.settings
+            )
+            let nextSettings = RecommendedPrintSettings.effectiveSettings(
+                settings: document.settings,
+                estimatedPageCount: estimatedPageCount
+            )
+            guard nextSettings != preparedDocument.settings.validated else {
+                break
+            }
+            preparedDocument = documentPreparedForPagination(
+                from: document,
+                settings: nextSettings,
+                subscriptionStatus: subscriptionStatus
+            )
+        }
+
+        return preparedDocument
     }
 
     static func printTextNormalizationReport(
@@ -84,6 +107,21 @@ nonisolated enum ManuscriptRenderPipeline {
             body: formattedBody,
             colophon: settings.colophon.validated
         )
+    }
+
+    private static func documentPreparedForPagination(
+        from document: ManuscriptDocument,
+        settings: EditorSettings,
+        subscriptionStatus: SubscriptionStatus
+    ) -> ManuscriptDocument {
+        var preparedDocument = document
+        preparedDocument.settings = settings
+        preparedDocument.body = ManuscriptFormatter.formatManuscriptText(
+            document.body,
+            settings: settings.formatSettings,
+            options: FormatOptions(isPremiumUser: subscriptionStatus == .paid)
+        )
+        return PrintTextNormalizer.normalizedDocument(preparedDocument)
     }
 
     private static func cachedPaginationResult(forKey key: String) -> ManuscriptPaginationResult? {

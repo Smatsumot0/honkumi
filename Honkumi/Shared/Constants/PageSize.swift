@@ -7,9 +7,13 @@ nonisolated enum PageSize: String, CaseIterable, Identifiable, Codable {
     case a5
     case b5
 
-    static let selectableCases: [PageSize] = [.a6, .shinsho, .b6, .a5, .b5]
+    static let selectableCases: [PageSize] = [.a6, .shinsho, .b6]
 
     var id: String { rawValue }
+
+    var isLegacySelection: Bool {
+        !Self.selectableCases.contains(self)
+    }
 
     var displayName: String {
         switch self {

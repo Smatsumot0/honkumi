@@ -10,38 +10,63 @@ final class DocumentStore: ObservableObject {
     private let legacyStorageKey = "honkumi.currentDocument"
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let userDefaults: UserDefaults
     private var pendingSaveTask: Task<Void, Never>?
 
-    init() {
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
         let loadedData: AppData
         let needsInitialSave: Bool
-        if let data = UserDefaults.standard.data(forKey: storageKey),
+        let canCreateInitialSample: Bool
+        if let data = userDefaults.data(forKey: storageKey),
            let savedData = try? decoder.decode(AppData.self, from: data) {
             let migratedData = Self.migrate(savedData)
             loadedData = Self.normalized(migratedData)
             needsInitialSave = loadedData != savedData
-        } else if let legacyData = UserDefaults.standard.data(forKey: legacyStorageKey),
+            canCreateInitialSample = false
+        } else if let legacyData = userDefaults.data(forKey: legacyStorageKey),
                   let legacyDocument = try? decoder.decode(ManuscriptDocument.self, from: legacyData) {
             loadedData = Self.migratedFromLegacyDocument(legacyDocument)
             needsInitialSave = true
+            canCreateInitialSample = false
         } else {
-            loadedData = .initial
+            loadedData = .emptyLibrary
             needsInitialSave = false
+            canCreateInitialSample = true
         }
 
         var initialData = loadedData
+        var shouldSaveInitialData = needsInitialSave
+        if canCreateInitialSample {
+            let seedResult = InitialSampleWork.seedIfNeeded(
+                in: initialData,
+                hasCreatedInitialSample: userDefaults.bool(forKey: InitialSampleWork.userDefaultsKey),
+                settings: Self.settingsForNewWork(from: initialData.userDefaultSettings)
+            )
+            initialData = seedResult.data
+            if seedResult.didCreateSample {
+                userDefaults.set(true, forKey: InitialSampleWork.userDefaultsKey)
+                shouldSaveInitialData = true
+            }
+        }
+
         initialData.subscriptionStatus = .free
+        initialData = Self.normalized(Self.migrate(initialData))
+        if initialData != loadedData {
+            shouldSaveInitialData = true
+        }
 
         self.appData = initialData
         self.document = Self.activeDocument(in: initialData)
-        if needsInitialSave || initialData != loadedData {
+        if shouldSaveInitialData {
             save()
         }
     }
 
     init(appData: AppData) {
+        self.userDefaults = .standard
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let loadedData = Self.normalized(Self.migrate(appData))
         self.appData = loadedData
@@ -223,7 +248,7 @@ final class DocumentStore: ObservableObject {
 
     private func save() {
         guard let data = try? encoder.encode(appData) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+        userDefaults.set(data, forKey: storageKey)
     }
 
     private func scheduleSave() {

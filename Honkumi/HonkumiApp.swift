@@ -4,6 +4,7 @@ import SwiftUI
 struct HonkumiApp: App {
     @StateObject private var documentStore = DocumentStore()
     @StateObject private var proStore = HonkumiProStore()
+    @StateObject private var pdfExportAdService = PDFExportAdService()
 
     init() {
         AppFontCatalog.registerBundledFonts()
@@ -14,7 +15,11 @@ struct HonkumiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(documentStore: documentStore, proStore: proStore)
+            ContentView(
+                documentStore: documentStore,
+                proStore: proStore,
+                pdfExportAdService: pdfExportAdService
+            )
         }
     }
 }

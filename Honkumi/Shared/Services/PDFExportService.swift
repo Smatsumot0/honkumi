@@ -7,9 +7,14 @@ nonisolated struct PDFExportService {
 
     func export(document: ManuscriptDocument, subscriptionStatus: SubscriptionStatus = .free) async throws -> URL {
         let exporter = bodyExporter
-        return try await Task.detached(priority: .userInitiated) {
+        let renderTask = Task.detached(priority: .userInitiated) {
             try exporter.export(document: document, subscriptionStatus: subscriptionStatus)
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            try await renderTask.value
+        } onCancel: {
+            renderTask.cancel()
+        }
     }
 
     func exportPreviewPDF(
@@ -19,14 +24,19 @@ nonisolated struct PDFExportService {
         generationID: UUID = UUID()
     ) async throws -> URL {
         let exporter = bodyExporter
-        return try await Task.detached(priority: .userInitiated) {
+        let renderTask = Task.detached(priority: .userInitiated) {
             try exporter.exportPreviewPDF(
                 document: document,
                 subscriptionStatus: subscriptionStatus,
                 previewKind: previewKind,
                 generationID: generationID
             )
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            try await renderTask.value
+        } onCancel: {
+            renderTask.cancel()
+        }
     }
 }
 
@@ -211,12 +221,20 @@ nonisolated struct BodyPDFExportService {
         previewKind: PreviewPDFKind = .normal,
         to outputURL: URL
     ) throws -> URL {
+        do {
+        try Task.checkCancellation()
         let paginationResult = ManuscriptRenderPipeline.paginationResult(
             for: document,
             subscriptionStatus: subscriptionStatus
         )
+        try Task.checkCancellation()
         let settings = paginationResult.document.settings.validated
         let pages = paginationResult.pages
+        let chapterHeaderPlan = ChapterHeaderLayoutPlanner.makePlan(
+            pages: pages,
+            settings: settings,
+            subscriptionStatus: subscriptionStatus
+        )
         let firstLayout = LayoutCalculator.layout(for: settings, pageNumber: 1)
         let firstGeometry = PDFPrintProduction.pageGeometry(for: firstLayout)
         let pdfTitle = document.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -227,21 +245,26 @@ nonisolated struct BodyPDFExportService {
         try? FileManager.default.removeItem(at: outputURL)
 
         if previewKind == .spread {
+            try Task.checkCancellation()
             try writeSpreadPreviewPDF(
                 to: outputURL,
                 pages: pages,
                 settings: settings,
                 subscriptionStatus: subscriptionStatus,
+                chapterHeaderPlan: chapterHeaderPlan,
                 pdfTitle: pdfTitle,
                 documentID: document.id,
                 rendererFormat: rendererFormat,
                 firstGeometry: firstGeometry
             )
+            try Task.checkCancellation()
             try PDFPrintProduction.normalizePDFVersionHeader(at: outputURL)
+            try Task.checkCancellation()
             return outputURL
         }
 
         let renderer = UIGraphicsPDFRenderer(bounds: firstGeometry.mediaBox, format: rendererFormat)
+        var renderingWasCancelled = false
 
         try renderer.writePDF(to: outputURL) { context in
             if let metadata = PDFPrintProduction.pdfX4Profile.xmpMetadataData(
@@ -261,6 +284,10 @@ nonisolated struct BodyPDFExportService {
                 subscriptionStatus: subscriptionStatus
             )
             for renderedPage in renderedPages {
+                guard !Task.isCancelled else {
+                    renderingWasCancelled = true
+                    return
+                }
                 let layout = LayoutCalculator.layout(for: settings, pageNumber: renderedPage.layoutPageNumber)
                 let geometry = PDFPrintProduction.pageGeometry(for: layout)
 
@@ -280,6 +307,7 @@ nonisolated struct BodyPDFExportService {
                     displayedPageNumber: displayedPageNumber,
                     showsPoweredByHonkumi: page.id == poweredByTargetPageID,
                     subscriptionStatus: subscriptionStatus,
+                    chapterHeaderPlan: chapterHeaderPlan,
                     in: layout
                 )
                 context.cgContext.restoreGState()
@@ -290,8 +318,17 @@ nonisolated struct BodyPDFExportService {
             }
         }
 
+        if renderingWasCancelled {
+            throw CancellationError()
+        }
+        try Task.checkCancellation()
         try PDFPrintProduction.normalizePDFVersionHeader(at: outputURL)
+        try Task.checkCancellation()
         return outputURL
+        } catch {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw error
+        }
     }
 
     private func writeSpreadPreviewPDF(
@@ -299,6 +336,7 @@ nonisolated struct BodyPDFExportService {
         pages: [PreviewPage],
         settings: EditorSettings,
         subscriptionStatus: SubscriptionStatus,
+        chapterHeaderPlan: ChapterHeaderLayoutPlan,
         pdfTitle: String,
         documentID: UUID,
         rendererFormat: UIGraphicsPDFRendererFormat,
@@ -319,6 +357,7 @@ nonisolated struct BodyPDFExportService {
             trimOffset: .zero
         ).pageInfo
         let renderer = UIGraphicsPDFRenderer(bounds: spreadBounds, format: rendererFormat)
+        var renderingWasCancelled = false
 
         try renderer.writePDF(to: outputURL) { context in
             if let metadata = PDFPrintProduction.pdfX4Profile.xmpMetadataData(
@@ -335,6 +374,10 @@ nonisolated struct BodyPDFExportService {
             )
 
             for pairStart in stride(from: 0, to: renderedPages.count, by: 2) {
+                guard !Task.isCancelled else {
+                    renderingWasCancelled = true
+                    return
+                }
                 let leftPage = renderedPages[pairStart]
                 let rightPage = renderedPages.indices.contains(pairStart + 1)
                     ? renderedPages[pairStart + 1]
@@ -352,6 +395,7 @@ nonisolated struct BodyPDFExportService {
                     poweredByTargetPageID: poweredByTargetPageID,
                     settings: settings,
                     subscriptionStatus: subscriptionStatus,
+                    chapterHeaderPlan: chapterHeaderPlan,
                     at: CGPoint(x: 0, y: 0)
                 )
                 drawRenderedSpreadPreviewPage(
@@ -359,10 +403,16 @@ nonisolated struct BodyPDFExportService {
                     poweredByTargetPageID: poweredByTargetPageID,
                     settings: settings,
                     subscriptionStatus: subscriptionStatus,
+                    chapterHeaderPlan: chapterHeaderPlan,
                     at: CGPoint(x: firstGeometry.mediaBox.width + gap, y: 0)
                 )
             }
         }
+
+        if renderingWasCancelled {
+            throw CancellationError()
+        }
+        try Task.checkCancellation()
     }
 
     private func drawRenderedSpreadPreviewPage(
@@ -370,6 +420,7 @@ nonisolated struct BodyPDFExportService {
         poweredByTargetPageID: UUID?,
         settings: EditorSettings,
         subscriptionStatus: SubscriptionStatus,
+        chapterHeaderPlan: ChapterHeaderLayoutPlan,
         at origin: CGPoint
     ) {
         let layout = LayoutCalculator.layout(for: settings, pageNumber: renderedPage.layoutPageNumber)
@@ -394,6 +445,7 @@ nonisolated struct BodyPDFExportService {
             displayedPageNumber: displayedPageNumber,
             showsPoweredByHonkumi: page.id == poweredByTargetPageID,
             subscriptionStatus: subscriptionStatus,
+            chapterHeaderPlan: chapterHeaderPlan,
             in: layout
         )
         context.restoreGState()
@@ -422,20 +474,20 @@ nonisolated struct BodyPDFExportService {
         from pages: [PreviewPage],
         settings: EditorSettings
     ) -> [RenderedPDFPage] {
-        var nextDisplayedPageNumber = settings.pageNumberStart
-        return pages.enumerated().map { index, page in
-            let displayedPageNumber: Int?
-            if case .body = page.kind {
-                displayedPageNumber = nextDisplayedPageNumber
-                nextDisplayedPageNumber += 1
-            } else {
-                displayedPageNumber = nil
-            }
+        let physicalPageNumbers = PDFPageNumberPolicy.physicalPageNumbers(
+            forPageCount: pages.count,
+            settings: settings
+        )
+        let displayedPageNumbers = PDFPageNumberPolicy.displayedPageNumbers(
+            for: pages.map(pageNumberContentKind),
+            settings: settings
+        )
 
+        return pages.enumerated().map { index, page in
             return RenderedPDFPage(
-                kind: .content(page, displayedPageNumber: displayedPageNumber),
-                layoutPageNumber: index + 1,
-                spreadPageNumber: index + 1
+                kind: .content(page, displayedPageNumber: displayedPageNumbers[index]),
+                layoutPageNumber: physicalPageNumbers[index],
+                spreadPageNumber: physicalPageNumbers[index]
             )
         }
     }
@@ -468,64 +520,23 @@ nonisolated struct BodyPDFExportService {
         from pages: [PreviewPage],
         settings: EditorSettings
     ) -> [RenderedPDFPage] {
-        let displayedPageNumbers = bodyDisplayedPageNumbers(from: pages, settings: settings)
-        var contentPages: [RenderedPDFPage] = []
-        var index = 0
+        let pageKinds = pages.map(pageNumberContentKind)
+        let physicalPageNumbers = PDFPageNumberPolicy.physicalPageNumbers(
+            forPageCount: pages.count,
+            settings: settings
+        )
+        let displayedPageNumbers = PDFPageNumberPolicy.displayedPageNumbers(
+            for: pageKinds,
+            settings: settings
+        )
 
-        while index < pages.count {
-            let page = pages[index]
-            if let displayedPageNumber = displayedPageNumbers[index] {
-                contentPages.append(RenderedPDFPage(
-                    kind: .content(page, displayedPageNumber: displayedPageNumber),
-                    layoutPageNumber: displayedPageNumber,
-                    spreadPageNumber: displayedPageNumber
-                ))
-                index += 1
-                continue
-            }
-
-            let runStart = index
-            while index < pages.count, displayedPageNumbers[index] == nil {
-                index += 1
-            }
-
-            let runEnd = index
-            let runCount = runEnd - runStart
-            let nextBodyPageNumber = displayedPageNumbers[index...].compactMap { $0 }.first
-            let previousBodyPageNumber = displayedPageNumbers[..<runStart].compactMap { $0 }.last
-            let logicalStartPageNumber: Int
-
-            if let nextBodyPageNumber {
-                logicalStartPageNumber = nextBodyPageNumber - runCount
-            } else if let previousBodyPageNumber {
-                logicalStartPageNumber = previousBodyPageNumber + 1
-            } else {
-                logicalStartPageNumber = 1
-            }
-
-            for offset in 0..<runCount {
-                let page = pages[runStart + offset]
-                let logicalPageNumber = logicalStartPageNumber + offset
-                contentPages.append(RenderedPDFPage(
-                    kind: .content(page, displayedPageNumber: nil),
-                    layoutPageNumber: layoutPageNumber(matchingParityOf: logicalPageNumber),
-                    spreadPageNumber: logicalPageNumber
-                ))
-            }
-        }
-
-        return contentPages
-    }
-
-    private func bodyDisplayedPageNumbers(
-        from pages: [PreviewPage],
-        settings: EditorSettings
-    ) -> [Int?] {
-        var nextDisplayedPageNumber = settings.pageNumberStart
-        return pages.map { page in
-            guard case .body = page.kind else { return nil }
-            defer { nextDisplayedPageNumber += 1 }
-            return nextDisplayedPageNumber
+        return pages.indices.map { index in
+            let physicalPageNumber = physicalPageNumbers[index]
+            return RenderedPDFPage(
+                kind: .content(pages[index], displayedPageNumber: displayedPageNumbers[index]),
+                layoutPageNumber: layoutPageNumber(matchingParityOf: physicalPageNumber),
+                spreadPageNumber: physicalPageNumber
+            )
         }
     }
 
@@ -547,6 +558,17 @@ nonisolated struct BodyPDFExportService {
 
     private func isOddPageNumber(_ pageNumber: Int) -> Bool {
         pageNumber % 2 != 0
+    }
+
+    private func pageNumberContentKind(for page: PreviewPage) -> PDFPageNumberContentKind {
+        switch page.kind {
+        case .body:
+            .body
+        case .tableOfContents:
+            .tableOfContents
+        case .colophon:
+            .colophon
+        }
     }
 
     static func temporaryExportURL(for document: ManuscriptDocument) -> URL {
@@ -607,6 +629,7 @@ nonisolated struct BodyPDFExportService {
         displayedPageNumber: Int?,
         showsPoweredByHonkumi: Bool,
         subscriptionStatus: SubscriptionStatus,
+        chapterHeaderPlan: ChapterHeaderLayoutPlan,
         in layout: PageLayout
     ) {
         switch page.kind {
@@ -632,13 +655,10 @@ nonisolated struct BodyPDFExportService {
             )
         }
 
-        if page.kind == .body,
-           layout.settings.showChapterTitle,
-           let chapterTitle = page.chapterTitle,
-           !page.chapterTitlesStartingOnPage.contains(chapterTitle) {
+        if let chapterHeaderFragment = chapterHeaderPlan.fragmentsByPageID[page.id] {
             drawChapterTitle(
-                chapterTitle,
-                isAdditionalFontPackUnlocked: subscriptionStatus == .paid,
+                chapterHeaderFragment,
+                subscriptionStatus: subscriptionStatus,
                 in: layout
             )
         }
@@ -1142,24 +1162,31 @@ nonisolated struct BodyPDFExportService {
     }
 
     private func drawChapterTitle(
-        _ title: String,
-        isAdditionalFontPackUnlocked: Bool,
+        _ fragment: ChapterHeaderFragment,
+        subscriptionStatus: SubscriptionStatus,
         in layout: PageLayout
     ) {
-        let title = printablePDFText(title)
+        let title = printablePDFText(fragment.text)
         guard !title.isEmpty else { return }
 
-        let font = pdfFont(
-            size: max(layout.fontSize * 0.8, 6),
-            in: layout,
-            isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked
+        let font = ChapterHeaderLayoutPlanner.font(
+            for: layout,
+            subscriptionStatus: subscriptionStatus
         )
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: UIColor.black
         ]
         let size = (title as NSString).size(withAttributes: attributes)
-        let x = layout.isOddPage ? layout.bodyFrame.minX : layout.bodyFrame.maxX - size.width
+        let preferredX: CGFloat
+        switch fragment.alignment {
+        case .leading:
+            preferredX = layout.bodyFrame.minX
+        case .trailing:
+            preferredX = layout.bodyFrame.maxX - size.width
+        }
+        let maximumX = layout.bodyFrame.maxX - min(size.width, layout.bodyFrame.width)
+        let x = min(max(preferredX, layout.bodyFrame.minX), maximumX)
         let y = max(layout.marginTop * 0.5, 4)
         (title as NSString).draw(at: CGPoint(x: x, y: y), withAttributes: attributes)
     }

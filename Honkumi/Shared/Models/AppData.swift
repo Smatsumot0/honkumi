@@ -10,6 +10,17 @@ nonisolated struct AppData: Codable, Equatable {
     var activeWorkId: UUID?
     var subscriptionStatus: SubscriptionStatus
 
+    static var emptyLibrary: AppData {
+        AppData(
+            version: currentVersion,
+            categories: [.uncategorized],
+            works: [],
+            userDefaultSettings: .default,
+            activeWorkId: nil,
+            subscriptionStatus: .free
+        )
+    }
+
     static var initial: AppData {
         let work = ManuscriptDocument(title: "無題の作品")
         return AppData(

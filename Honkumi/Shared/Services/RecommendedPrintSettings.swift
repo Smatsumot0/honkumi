@@ -1,38 +1,41 @@
 import CoreGraphics
 import Foundation
 
+nonisolated struct RecommendedLayoutSetting: Equatable {
+    var charactersPerLine: Int
+    var linesPerPage: Int
+    var fontSizePt: CGFloat
+    var marginTopMm: CGFloat
+    var marginBottomMm: CGFloat
+    var marginInnerMm: CGFloat
+    var marginOuterMm: CGFloat
+}
+
 nonisolated enum RecommendedPrintSettings {
-    static let unsupportedPageSizeMessage = "A5/B5の推奨設定は段組み対応後に利用できます"
+    static let unsupportedPageSizeMessage = "A5/B5の推奨設定は今後対応予定です"
     static let wideGutterNote = "ページ数が多い本では、製本後にノド側が読みにくくなるため、ノド余白を広めに設定しています。"
 
     private enum PageBand: CaseIterable, Hashable {
         case upTo48
-        case upTo99
-        case upTo199
-        case over200
+        case upTo96
+        case upTo160
+        case upTo240
+        case over240
 
         init(pageCount: Int) {
             switch pageCount {
             case ...48:
                 self = .upTo48
-            case 49...99:
-                self = .upTo99
-            case 100...199:
-                self = .upTo199
+            case 49...96:
+                self = .upTo96
+            case 97...160:
+                self = .upTo160
+            case 161...240:
+                self = .upTo240
             default:
-                self = .over200
+                self = .over240
             }
         }
-    }
-
-    private struct Preset: Equatable {
-        var fontSize: CGFloat
-        var charactersPerLine: Int
-        var linesPerPage: Int
-        var marginTop: CGFloat
-        var marginBottom: CGFloat
-        var marginInner: CGFloat
-        var marginOuter: CGFloat
     }
 
     static func effectiveSettings(for document: ManuscriptDocument) -> EditorSettings {
@@ -46,19 +49,19 @@ nonisolated enum RecommendedPrintSettings {
         }
 
         guard supportsRecommendations(for: validated.pageSize),
-              let standardPreset = preset(for: validated.pageSize, band: .upTo48) else {
+              let standardPreset = recommendation(for: validated.pageSize, estimatedPageCount: 1) else {
             return validated
         }
 
         var recommended = settingsByApplyingPreset(standardPreset, to: validated)
-        let firstPageCount = recommendationPageCount(body: body, settings: recommended)
+        let firstPageCount = estimatedPageCount(body: body, settings: recommended)
         recommended = settingsByApplyingRecommendation(
             to: validated,
             estimatedPageCount: firstPageCount
         )
 
         for _ in 0..<2 {
-            let pageCount = recommendationPageCount(body: body, settings: recommended)
+            let pageCount = estimatedPageCount(body: body, settings: recommended)
             let next = settingsByApplyingRecommendation(to: validated, estimatedPageCount: pageCount)
             if next == recommended {
                 break
@@ -67,6 +70,21 @@ nonisolated enum RecommendedPrintSettings {
         }
 
         return recommended.validated
+    }
+
+    static func effectiveSettings(
+        settings: EditorSettings,
+        estimatedPageCount: Int
+    ) -> EditorSettings {
+        let validated = settings.validated
+        guard validated.useRecommendedTypography || validated.useRecommendedMargins else {
+            return validated
+        }
+
+        return settingsByApplyingRecommendation(
+            to: validated,
+            estimatedPageCount: estimatedPageCount
+        ).validated
     }
 
     static func estimatedPageCount(body: String, settings: EditorSettings) -> Int {
@@ -153,37 +171,54 @@ nonisolated enum RecommendedPrintSettings {
         }
 
         let effectiveSettings = effectiveSettings(body: body, settings: settings)
-        return estimatedPageCount(body: body, settings: effectiveSettings) >= 100
+        return estimatedPageCount(body: body, settings: effectiveSettings) >= 97
+    }
+
+    static func recommendation(
+        for pageSize: PageSize,
+        estimatedPageCount: Int
+    ) -> RecommendedLayoutSetting? {
+        guard let preset = presetTable[pageSize]?[PageBand(pageCount: estimatedPageCount)] else {
+            return nil
+        }
+        return readableRecommendation(from: preset, pageSize: pageSize)
     }
 
     private static func settingsByApplyingRecommendation(
         to settings: EditorSettings,
         estimatedPageCount: Int
     ) -> EditorSettings {
-        let band = PageBand(pageCount: estimatedPageCount)
-        guard let preset = preset(for: settings.pageSize, band: band) else {
+        guard let preset = recommendation(for: settings.pageSize, estimatedPageCount: estimatedPageCount) else {
             return settings.validated
         }
         return settingsByApplyingPreset(preset, to: settings)
     }
 
     private static func settingsByApplyingPreset(
-        _ preset: Preset,
+        _ preset: RecommendedLayoutSetting,
         to settings: EditorSettings
     ) -> EditorSettings {
         var updated = settings.validated
 
-        if updated.useRecommendedTypography {
-            updated.fontSize = preset.fontSize
-            updated.charactersPerLine = preset.charactersPerLine
-            updated.linesPerPage = preset.linesPerPage
+        if updated.useRecommendedMargins {
+            updated.marginTop = preset.marginTopMm
+            updated.marginBottom = preset.marginBottomMm
+            updated.marginInner = preset.marginInnerMm
+            updated.marginOuter = preset.marginOuterMm
         }
 
-        if updated.useRecommendedMargins {
-            updated.marginTop = preset.marginTop
-            updated.marginBottom = preset.marginBottom
-            updated.marginInner = preset.marginInner
-            updated.marginOuter = preset.marginOuter
+        if updated.useRecommendedTypography {
+            let readablePreset = readableRecommendation(
+                from: preset,
+                pageSize: updated.pageSize,
+                marginTopMm: updated.marginTop,
+                marginBottomMm: updated.marginBottom,
+                marginInnerMm: updated.marginInner,
+                marginOuterMm: updated.marginOuter
+            )
+            updated.fontSize = readablePreset.fontSizePt
+            updated.charactersPerLine = readablePreset.charactersPerLine
+            updated.linesPerPage = readablePreset.linesPerPage
         }
 
         updated.lineSpacing = 0
@@ -191,130 +226,257 @@ nonisolated enum RecommendedPrintSettings {
         return updated.validated
     }
 
-    private static func recommendationPageCount(body: String, settings: EditorSettings) -> Int {
-        let settings = settings.validated
-        let bodyCharacterCount = ManuscriptMarkupParser.characterCountBody(from: body).count
-        let charactersPerPage = max(settings.charactersPerLine * settings.linesPerPage, 1)
-        return max(Int(ceil(CGFloat(bodyCharacterCount) / CGFloat(charactersPerPage))), 1)
+    private static let minimumReadableCharacterAdvanceRatio: CGFloat = 0.9
+    private static let minimumReadableLineAdvanceRatio: CGFloat = 1.5
+    private static let fallbackFontSizeStep: CGFloat = 0.5
+
+    private static func readableRecommendation(
+        from preset: RecommendedLayoutSetting,
+        pageSize: PageSize
+    ) -> RecommendedLayoutSetting {
+        readableRecommendation(
+            from: preset,
+            pageSize: pageSize,
+            marginTopMm: preset.marginTopMm,
+            marginBottomMm: preset.marginBottomMm,
+            marginInnerMm: preset.marginInnerMm,
+            marginOuterMm: preset.marginOuterMm
+        )
     }
 
-    private static func preset(for pageSize: PageSize, band: PageBand) -> Preset? {
-        presetTable[pageSize]?[band]
+    private static func readableRecommendation(
+        from preset: RecommendedLayoutSetting,
+        pageSize: PageSize,
+        marginTopMm: CGFloat,
+        marginBottomMm: CGFloat,
+        marginInnerMm: CGFloat,
+        marginOuterMm: CGFloat
+    ) -> RecommendedLayoutSetting {
+        let bodyWidth = max(
+            LayoutCalculator.millimetersToPoints(CGFloat(pageSize.widthMillimeters) - marginInnerMm - marginOuterMm),
+            1
+        )
+        let bodyHeight = max(
+            LayoutCalculator.millimetersToPoints(CGFloat(pageSize.heightMillimeters) - marginTopMm - marginBottomMm),
+            1
+        )
+        let fontSize = readableFontSize(
+            requestedFontSize: preset.fontSizePt,
+            bodyWidth: bodyWidth,
+            bodyHeight: bodyHeight
+        )
+
+        return RecommendedLayoutSetting(
+            charactersPerLine: readableCount(
+                requestedCount: preset.charactersPerLine,
+                availableAdvance: bodyHeight,
+                minimumAdvance: fontSize * minimumReadableCharacterAdvanceRatio,
+                range: EditorSettings.charactersPerLineRange
+            ),
+            linesPerPage: readableCount(
+                requestedCount: preset.linesPerPage,
+                availableAdvance: bodyWidth,
+                minimumAdvance: fontSize * minimumReadableLineAdvanceRatio,
+                range: EditorSettings.linesPerPageRange
+            ),
+            fontSizePt: fontSize,
+            marginTopMm: preset.marginTopMm,
+            marginBottomMm: preset.marginBottomMm,
+            marginInnerMm: preset.marginInnerMm,
+            marginOuterMm: preset.marginOuterMm
+        )
     }
 
-    private static let presetTable: [PageSize: [PageBand: Preset]] = [
+    private static func readableFontSize(
+        requestedFontSize: CGFloat,
+        bodyWidth: CGFloat,
+        bodyHeight: CGFloat
+    ) -> CGFloat {
+        let minimumFontSize = EditorSettings.fontSizeRange.lowerBound
+        var fontSize = EditorSettings.roundedPrintFontSize(requestedFontSize)
+
+        while fontSize > minimumFontSize {
+            let fitsMinimumCharacterCount = maximumReadableCount(
+                availableAdvance: bodyHeight,
+                minimumAdvance: fontSize * minimumReadableCharacterAdvanceRatio
+            ) >= EditorSettings.charactersPerLineRange.lowerBound
+            let fitsMinimumLineCount = maximumReadableCount(
+                availableAdvance: bodyWidth,
+                minimumAdvance: fontSize * minimumReadableLineAdvanceRatio
+            ) >= EditorSettings.linesPerPageRange.lowerBound
+
+            if fitsMinimumCharacterCount && fitsMinimumLineCount {
+                break
+            }
+
+            fontSize = max(minimumFontSize, fontSize - fallbackFontSizeStep)
+        }
+
+        return EditorSettings.roundedPrintFontSize(fontSize)
+    }
+
+    private static func readableCount(
+        requestedCount: Int,
+        availableAdvance: CGFloat,
+        minimumAdvance: CGFloat,
+        range: ClosedRange<Int>
+    ) -> Int {
+        let maximumCount = maximumReadableCount(
+            availableAdvance: availableAdvance,
+            minimumAdvance: minimumAdvance
+        )
+        return min(requestedCount, maximumCount)
+            .clamped(to: range)
+    }
+
+    private static func maximumReadableCount(
+        availableAdvance: CGFloat,
+        minimumAdvance: CGFloat
+    ) -> Int {
+        guard minimumAdvance > 0 else { return Int.max }
+        return max(Int(floor(availableAdvance / minimumAdvance)), 1)
+    }
+
+    private static let presetTable: [PageSize: [PageBand: RecommendedLayoutSetting]] = [
         .a6: [
-            .upTo48: Preset(
-                fontSize: 9.0,
+            .upTo48: RecommendedLayoutSetting(
+                charactersPerLine: 34,
+                linesPerPage: 14,
+                fontSizePt: 10.0,
+                marginTopMm: 18,
+                marginBottomMm: 20,
+                marginInnerMm: 16,
+                marginOuterMm: 13
+            ),
+            .upTo96: RecommendedLayoutSetting(
                 charactersPerLine: 38,
                 linesPerPage: 16,
-                marginTop: 16,
-                marginBottom: 16,
-                marginInner: 15,
-                marginOuter: 13
+                fontSizePt: 9.5,
+                marginTopMm: 17,
+                marginBottomMm: 19,
+                marginInnerMm: 18,
+                marginOuterMm: 12
             ),
-            .upTo99: Preset(
-                fontSize: 8.5,
+            .upTo160: RecommendedLayoutSetting(
+                charactersPerLine: 39,
+                linesPerPage: 17,
+                fontSizePt: 9.0,
+                marginTopMm: 16,
+                marginBottomMm: 18,
+                marginInnerMm: 22,
+                marginOuterMm: 11
+            ),
+            .upTo240: RecommendedLayoutSetting(
                 charactersPerLine: 40,
                 linesPerPage: 17,
-                marginTop: 15,
-                marginBottom: 15,
-                marginInner: 20,
-                marginOuter: 12
+                fontSizePt: 9.0,
+                marginTopMm: 15,
+                marginBottomMm: 17,
+                marginInnerMm: 24,
+                marginOuterMm: 10
             ),
-            .upTo199: Preset(
-                fontSize: 8.5,
-                charactersPerLine: 42,
-                linesPerPage: 17,
-                marginTop: 14,
-                marginBottom: 14,
-                marginInner: 25,
-                marginOuter: 11
-            ),
-            .over200: Preset(
-                fontSize: 8.0,
-                charactersPerLine: 43,
+            .over240: RecommendedLayoutSetting(
+                charactersPerLine: 40,
                 linesPerPage: 18,
-                marginTop: 13,
-                marginBottom: 13,
-                marginInner: 25,
-                marginOuter: 11
+                fontSizePt: 8.5,
+                marginTopMm: 15,
+                marginBottomMm: 16,
+                marginInnerMm: 26,
+                marginOuterMm: 10
             )
         ],
         .shinsho: [
-            .upTo48: Preset(
-                fontSize: 9.0,
-                charactersPerLine: 39,
+            .upTo48: RecommendedLayoutSetting(
+                charactersPerLine: 38,
                 linesPerPage: 15,
-                marginTop: 20,
-                marginBottom: 20,
-                marginInner: 15,
-                marginOuter: 14
+                fontSizePt: 10.0,
+                marginTopMm: 20,
+                marginBottomMm: 22,
+                marginInnerMm: 16,
+                marginOuterMm: 13
             ),
-            .upTo99: Preset(
-                fontSize: 8.5,
+            .upTo96: RecommendedLayoutSetting(
                 charactersPerLine: 40,
                 linesPerPage: 16,
-                marginTop: 18,
-                marginBottom: 18,
-                marginInner: 20,
-                marginOuter: 13
+                fontSizePt: 9.5,
+                marginTopMm: 20,
+                marginBottomMm: 20,
+                marginInnerMm: 18,
+                marginOuterMm: 12
             ),
-            .upTo199: Preset(
-                fontSize: 8.5,
+            .upTo160: RecommendedLayoutSetting(
                 charactersPerLine: 41,
                 linesPerPage: 17,
-                marginTop: 17,
-                marginBottom: 17,
-                marginInner: 25,
-                marginOuter: 12
+                fontSizePt: 9.0,
+                marginTopMm: 19,
+                marginBottomMm: 19,
+                marginInnerMm: 22,
+                marginOuterMm: 11
             ),
-            .over200: Preset(
-                fontSize: 8.0,
+            .upTo240: RecommendedLayoutSetting(
+                charactersPerLine: 42,
+                linesPerPage: 17,
+                fontSizePt: 9.0,
+                marginTopMm: 18,
+                marginBottomMm: 18,
+                marginInnerMm: 24,
+                marginOuterMm: 10
+            ),
+            .over240: RecommendedLayoutSetting(
                 charactersPerLine: 42,
                 linesPerPage: 18,
-                marginTop: 16,
-                marginBottom: 16,
-                marginInner: 25,
-                marginOuter: 11
+                fontSizePt: 8.5,
+                marginTopMm: 18,
+                marginBottomMm: 17,
+                marginInnerMm: 26,
+                marginOuterMm: 10
             )
         ],
         .b6: [
-            .upTo48: Preset(
-                fontSize: 9.5,
+            .upTo48: RecommendedLayoutSetting(
                 charactersPerLine: 42,
-                linesPerPage: 16,
-                marginTop: 18,
-                marginBottom: 18,
-                marginInner: 15,
-                marginOuter: 14
+                linesPerPage: 15,
+                fontSizePt: 10.0,
+                marginTopMm: 20,
+                marginBottomMm: 22,
+                marginInnerMm: 17,
+                marginOuterMm: 15
             ),
-            .upTo99: Preset(
-                fontSize: 9.0,
+            .upTo96: RecommendedLayoutSetting(
                 charactersPerLine: 44,
-                linesPerPage: 17,
-                marginTop: 17,
-                marginBottom: 17,
-                marginInner: 20,
-                marginOuter: 13
+                linesPerPage: 16,
+                fontSizePt: 9.5,
+                marginTopMm: 19,
+                marginBottomMm: 21,
+                marginInnerMm: 19,
+                marginOuterMm: 14
             ),
-            .upTo199: Preset(
-                fontSize: 8.5,
+            .upTo160: RecommendedLayoutSetting(
+                charactersPerLine: 45,
+                linesPerPage: 17,
+                fontSizePt: 9.0,
+                marginTopMm: 18,
+                marginBottomMm: 20,
+                marginInnerMm: 23,
+                marginOuterMm: 13
+            ),
+            .upTo240: RecommendedLayoutSetting(
                 charactersPerLine: 46,
                 linesPerPage: 17,
-                marginTop: 16,
-                marginBottom: 16,
-                marginInner: 25,
-                marginOuter: 12
+                fontSizePt: 9.0,
+                marginTopMm: 17,
+                marginBottomMm: 19,
+                marginInnerMm: 25,
+                marginOuterMm: 12
             ),
-            .over200: Preset(
-                fontSize: 8.5,
+            .over240: RecommendedLayoutSetting(
                 charactersPerLine: 47,
                 linesPerPage: 18,
-                marginTop: 15,
-                marginBottom: 15,
-                marginInner: 25,
-                marginOuter: 11
+                fontSizePt: 8.5,
+                marginTopMm: 16,
+                marginBottomMm: 18,
+                marginInnerMm: 27,
+                marginOuterMm: 12
             )
         ]
     ]
@@ -332,5 +494,11 @@ nonisolated enum RecommendedPrintSettings {
             alphanumericOrientation: alphanumericOrientation
         )
         return max(Int(ceil(CGFloat(cellCount) / CGFloat(max(charactersPerLine, 1)))), 1)
+    }
+}
+
+nonisolated private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }

@@ -38,6 +38,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
     var pageNumberSize: CGFloat
     var pageNumberStart: Int
     var pageNumberPosition: PageNumberPosition
+    var showPageNumberOnToc: Bool
+    var showPageNumberOnColophon: Bool
     var showTableOfContents: Bool
     var showChapterTitle: Bool
     var chapterTitleStyle: ChapterTitleStyle
@@ -78,6 +80,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         pageNumberSize: CGFloat,
         pageNumberStart: Int = 1,
         pageNumberPosition: PageNumberPosition,
+        showPageNumberOnToc: Bool = true,
+        showPageNumberOnColophon: Bool = true,
         showTableOfContents: Bool,
         showChapterTitle: Bool,
         chapterTitleStyle: ChapterTitleStyle,
@@ -107,6 +111,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         self.pageNumberSize = pageNumberSize
         self.pageNumberStart = pageNumberStart
         self.pageNumberPosition = pageNumberPosition
+        self.showPageNumberOnToc = showPageNumberOnToc
+        self.showPageNumberOnColophon = showPageNumberOnColophon
         self.showTableOfContents = showTableOfContents
         self.showChapterTitle = showChapterTitle
         self.chapterTitleStyle = chapterTitleStyle
@@ -138,6 +144,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
         pageNumberSize: 7,
         pageNumberStart: 1,
         pageNumberPosition: .outside,
+        showPageNumberOnToc: true,
+        showPageNumberOnColophon: true,
         showTableOfContents: false,
         showChapterTitle: false,
         chapterTitleStyle: .plain,
@@ -170,6 +178,8 @@ nonisolated struct EditorSettings: Codable, Equatable {
             pageNumberSize: pageNumberSize.clamped(to: Self.pageNumberSizeRange),
             pageNumberStart: pageNumberStart.clamped(to: Self.pageNumberStartRange),
             pageNumberPosition: pageNumberPosition,
+            showPageNumberOnToc: showPageNumberOnToc,
+            showPageNumberOnColophon: showPageNumberOnColophon,
             showTableOfContents: showTableOfContents,
             showChapterTitle: showChapterTitle,
             chapterTitleStyle: chapterTitleStyle,
@@ -205,12 +215,16 @@ nonisolated extension EditorSettings {
         case pageNumberSize
         case pageNumberStart
         case pageNumberPosition
+        case showPageNumberOnToc
+        case showPageNumberOnColophon
         case showTableOfContents
         case showChapterTitle
         case chapterTitleStyle
         case startsChapterOnNewPage
         case alphanumericOrientation
         case useRecommendedPrintSettings
+        case recommendedTypesettingEnabled
+        case recommendedMarginsEnabled
         case useRecommendedTypography
         case useRecommendedMargins
         case showsCropMarks
@@ -236,6 +250,14 @@ nonisolated extension EditorSettings {
             Bool.self,
             forKey: .useRecommendedPrintSettings
         )
+        let recommendedTypesettingEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .recommendedTypesettingEnabled
+        )
+        let recommendedMarginsEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .recommendedMarginsEnabled
+        )
         let migratedRecommendationDefault = legacyUseRecommendedPrintSettings ?? false
 
         self.init(
@@ -257,13 +279,15 @@ nonisolated extension EditorSettings {
             pageNumberSize: try container.decodeIfPresent(CGFloat.self, forKey: .pageNumberSize) ?? defaults.pageNumberSize,
             pageNumberStart: try container.decodeIfPresent(Int.self, forKey: .pageNumberStart) ?? defaults.pageNumberStart,
             pageNumberPosition: decodedPageNumberPosition,
+            showPageNumberOnToc: try container.decodeIfPresent(Bool.self, forKey: .showPageNumberOnToc) ?? true,
+            showPageNumberOnColophon: try container.decodeIfPresent(Bool.self, forKey: .showPageNumberOnColophon) ?? true,
             showTableOfContents: try container.decodeIfPresent(Bool.self, forKey: .showTableOfContents) ?? defaults.showTableOfContents,
             showChapterTitle: try container.decodeIfPresent(Bool.self, forKey: .showChapterTitle) ?? defaults.showChapterTitle,
             chapterTitleStyle: try container.decodeIfPresent(ChapterTitleStyle.self, forKey: .chapterTitleStyle) ?? defaults.chapterTitleStyle,
             startsChapterOnNewPage: try container.decodeIfPresent(Bool.self, forKey: .startsChapterOnNewPage) ?? defaults.startsChapterOnNewPage,
             alphanumericOrientation: try container.decodeIfPresent(AlphanumericOrientation.self, forKey: .alphanumericOrientation) ?? defaults.alphanumericOrientation,
-            useRecommendedTypography: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedTypography) ?? migratedRecommendationDefault,
-            useRecommendedMargins: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedMargins) ?? migratedRecommendationDefault,
+            useRecommendedTypography: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedTypography) ?? recommendedTypesettingEnabled ?? migratedRecommendationDefault,
+            useRecommendedMargins: try container.decodeIfPresent(Bool.self, forKey: .useRecommendedMargins) ?? recommendedMarginsEnabled ?? migratedRecommendationDefault,
             showsCropMarks: try container.decodeIfPresent(Bool.self, forKey: .showsCropMarks) ?? defaults.showsCropMarks,
             colophon: try container.decodeIfPresent(ColophonSettings.self, forKey: .colophon) ?? defaults.colophon,
             formatSettings: try container.decodeIfPresent(FormatSettings.self, forKey: .formatSettings) ?? defaults.formatSettings
@@ -290,6 +314,8 @@ nonisolated extension EditorSettings {
         try container.encode(pageNumberSize, forKey: .pageNumberSize)
         try container.encode(pageNumberStart, forKey: .pageNumberStart)
         try container.encode(pageNumberPosition, forKey: .pageNumberPosition)
+        try container.encode(showPageNumberOnToc, forKey: .showPageNumberOnToc)
+        try container.encode(showPageNumberOnColophon, forKey: .showPageNumberOnColophon)
         try container.encode(showTableOfContents, forKey: .showTableOfContents)
         try container.encode(showChapterTitle, forKey: .showChapterTitle)
         try container.encode(chapterTitleStyle, forKey: .chapterTitleStyle)
@@ -297,6 +323,8 @@ nonisolated extension EditorSettings {
         try container.encode(alphanumericOrientation, forKey: .alphanumericOrientation)
         try container.encode(useRecommendedTypography, forKey: .useRecommendedTypography)
         try container.encode(useRecommendedMargins, forKey: .useRecommendedMargins)
+        try container.encode(useRecommendedTypography, forKey: .recommendedTypesettingEnabled)
+        try container.encode(useRecommendedMargins, forKey: .recommendedMarginsEnabled)
         try container.encode(showsCropMarks, forKey: .showsCropMarks)
         try container.encode(colophon, forKey: .colophon)
         try container.encode(formatSettings, forKey: .formatSettings)

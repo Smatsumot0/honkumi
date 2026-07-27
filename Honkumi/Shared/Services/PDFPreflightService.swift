@@ -110,6 +110,14 @@ nonisolated struct PDFPreflightService {
         )
         checkPrintSettings(effectiveSettings, into: &issues)
         checkPDFDisplay(settings: effectiveSettings, pages: pages, into: &issues)
+        checkChapterHeaderLayout(
+            settings: effectiveSettings,
+            pages: pages,
+            subscriptionStatus: subscriptionStatus,
+            into: &issues
+        )
+        checkPageNumberRenderingPolicy(settings: effectiveSettings, pages: pages, into: &issues)
+        checkRecommendedSettingsConformance(settings: effectiveSettings, pages: pages, into: &issues)
         checkSubmissionReadiness(
             settings: effectiveSettings,
             pages: pages,
@@ -386,6 +394,168 @@ nonisolated struct PDFPreflightService {
         }
     }
 
+    private func checkPageNumberRenderingPolicy(
+        settings: EditorSettings,
+        pages: [PreviewPage],
+        into issues: inout [PreflightIssue]
+    ) {
+        guard settings.isPageNumberEnabled else { return }
+
+        let pageKinds = pages.map(pageNumberContentKind)
+        let displayedPageNumbers = PDFPageNumberPolicy.displayedPageNumbers(
+            for: pageKinds,
+            settings: settings
+        )
+
+        func hasMissingPageNumber(for pageKind: PDFPageNumberContentKind) -> Bool {
+            zip(pageKinds, displayedPageNumbers).contains { candidateKind, displayedPageNumber in
+                candidateKind == pageKind && displayedPageNumber == nil
+            }
+        }
+
+        if hasMissingPageNumber(for: .body) {
+            issues.append(warning(
+                id: "display.pageNumberMissing.body",
+                title: "本文ページにノンブルが表示されません",
+                message: "ノンブルを表示する設定ですが、本文ページにノンブルが出ない状態です。表示位置の設定を確認してください。",
+                location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "pageNumberPosition")
+            ))
+        }
+
+        if settings.showPageNumberOnToc,
+           hasMissingPageNumber(for: .tableOfContents) {
+            issues.append(warning(
+                id: "display.pageNumberMissing.toc",
+                title: "目次ページにノンブルが表示されません",
+                message: "目次にノンブルを表示する設定ですが、PDF上では非表示になる状態です。",
+                location: .init(type: .toc, pageNumber: nil, characterRange: nil, settingKey: "showPageNumberOnToc")
+            ))
+        }
+
+        if settings.showPageNumberOnColophon,
+           hasMissingPageNumber(for: .colophon) {
+            issues.append(warning(
+                id: "display.pageNumberMissing.colophon",
+                title: "奥付ページにノンブルが表示されません",
+                message: "奥付にノンブルを表示する設定ですが、PDF上では非表示になる状態です。",
+                location: .init(type: .colophon, pageNumber: nil, characterRange: nil, settingKey: "showPageNumberOnColophon")
+            ))
+        }
+    }
+
+    private func checkChapterHeaderLayout(
+        settings: EditorSettings,
+        pages: [PreviewPage],
+        subscriptionStatus: SubscriptionStatus,
+        into issues: inout [PreflightIssue]
+    ) {
+        let plan = ChapterHeaderLayoutPlanner.makePlan(
+            pages: pages,
+            settings: settings,
+            subscriptionStatus: subscriptionStatus
+        )
+
+        for (index, issue) in plan.issues.enumerated() {
+            switch issue {
+            case let .spread(title, pageNumbers):
+                let pageNumbersText = pageNumbers.map(String.init).joined(separator: "・")
+                issues.append(warning(
+                    id: chapterHeaderIssueID(
+                        kind: "spread",
+                        pageNumbers: pageNumbers,
+                        index: index
+                    ),
+                    title: "章タイトルが見開きにまたがります",
+                    message: "「\(title)」を見開き \(pageNumbersText) ページに分けて表示します。",
+                    location: .init(
+                        type: .page,
+                        pageNumber: pageNumbers.first,
+                        characterRange: nil,
+                        settingKey: "showChapterTitle"
+                    )
+                ))
+            case let .overflow(title, pageNumbers):
+                let pageNumbersText = pageNumbers.map(String.init).joined(separator: "・")
+                issues.append(error(
+                    id: chapterHeaderIssueID(
+                        kind: "overflow",
+                        pageNumbers: pageNumbers,
+                        index: index
+                    ),
+                    title: "章タイトルが見開きに収まりません",
+                    message: "「\(title)」は見開き \(pageNumbersText) ページの上部に収まりません。章タイトルを短くしてください。",
+                    location: .init(
+                        type: .page,
+                        pageNumber: pageNumbers.first,
+                        characterRange: nil,
+                        settingKey: "showChapterTitle"
+                    )
+                ))
+            }
+        }
+    }
+
+    private func chapterHeaderIssueID(
+        kind: String,
+        pageNumbers: [Int],
+        index: Int
+    ) -> String {
+        let pages = pageNumbers.map(String.init).joined(separator: "-")
+        return "pdf.chapterHeader.\(kind).\(pages).\(index)"
+    }
+
+    private func checkRecommendedSettingsConformance(
+        settings: EditorSettings,
+        pages: [PreviewPage],
+        into issues: inout [PreflightIssue]
+    ) {
+        guard settings.useRecommendedTypography || settings.useRecommendedMargins,
+              let recommendation = RecommendedPrintSettings.recommendation(
+                for: settings.pageSize,
+                estimatedPageCount: pages.count
+              ) else {
+            return
+        }
+
+        var mismatches: [String] = []
+
+        if settings.useRecommendedTypography {
+            if settings.charactersPerLine != recommendation.charactersPerLine {
+                mismatches.append("文字数 \(settings.charactersPerLine)字 / 推奨 \(recommendation.charactersPerLine)字")
+            }
+            if settings.linesPerPage != recommendation.linesPerPage {
+                mismatches.append("行数 \(settings.linesPerPage)行 / 推奨 \(recommendation.linesPerPage)行")
+            }
+            if !approximatelyEqual(settings.fontSize, recommendation.fontSizePt) {
+                mismatches.append("文字サイズ \(formatted(settings.fontSize))pt / 推奨 \(formatted(recommendation.fontSizePt))pt")
+            }
+        }
+
+        if settings.useRecommendedMargins {
+            if !approximatelyEqual(settings.marginTop, recommendation.marginTopMm) {
+                mismatches.append("天 \(formatted(settings.marginTop))mm / 推奨 \(formatted(recommendation.marginTopMm))mm")
+            }
+            if !approximatelyEqual(settings.marginBottom, recommendation.marginBottomMm) {
+                mismatches.append("地 \(formatted(settings.marginBottom))mm / 推奨 \(formatted(recommendation.marginBottomMm))mm")
+            }
+            if !approximatelyEqual(settings.marginInner, recommendation.marginInnerMm) {
+                mismatches.append("ノド \(formatted(settings.marginInner))mm / 推奨 \(formatted(recommendation.marginInnerMm))mm")
+            }
+            if !approximatelyEqual(settings.marginOuter, recommendation.marginOuterMm) {
+                mismatches.append("小口 \(formatted(settings.marginOuter))mm / 推奨 \(formatted(recommendation.marginOuterMm))mm")
+            }
+        }
+
+        guard !mismatches.isEmpty else { return }
+
+        issues.append(warning(
+            id: "settings.recommendedValuesMismatch",
+            title: "推奨設定とPDF設定が一致していません",
+            message: "推奨設定がオンですが、最終ページ数に対する推奨値と異なる項目があります: \(mismatches.joined(separator: "、"))。",
+            location: .init(type: .settings, pageNumber: nil, characterRange: nil, settingKey: "recommendedPrintSettings")
+        ))
+    }
+
     private func checkSubmissionReadiness(
         settings: EditorSettings,
         pages: [PreviewPage],
@@ -504,6 +674,21 @@ nonisolated struct PDFPreflightService {
                 location: .init(type: .colophon, pageNumber: pages.count, characterRange: nil, settingKey: "circleImageData")
             ))
         }
+    }
+
+    private func pageNumberContentKind(for page: PreviewPage) -> PDFPageNumberContentKind {
+        switch page.kind {
+        case .body:
+            .body
+        case .tableOfContents:
+            .tableOfContents
+        case .colophon:
+            .colophon
+        }
+    }
+
+    private func approximatelyEqual(_ lhs: CGFloat, _ rhs: CGFloat) -> Bool {
+        abs(lhs - rhs) <= 0.001
     }
 
     private func checkRange(

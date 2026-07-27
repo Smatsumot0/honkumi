@@ -63,7 +63,7 @@ nonisolated struct PrintTextNormalizationReport: Equatable {
 
 nonisolated enum PrintTextNormalizer {
     static let printableHeart = "♡"
-    static let unsupportedEmojiReplacement = "□×"
+    static let unsupportedEmojiReplacement = "□"
 
     static func normalizedDocument(_ document: ManuscriptDocument) -> ManuscriptDocument {
         var normalizedDocument = document

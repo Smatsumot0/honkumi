@@ -81,7 +81,7 @@ struct EditorView: View {
                     } label: {
                         Image(systemName: "arrow.up.to.line")
                     }
-                    .accessibilityLabel("一番上まで移動")
+                    .accessibilityLabel("一番上へ移動")
                     .disabled(selectedRange.location == 0)
 
                     Button {
@@ -89,7 +89,7 @@ struct EditorView: View {
                     } label: {
                         Image(systemName: "arrow.up")
                     }
-                    .accessibilityLabel("上に移動")
+                    .accessibilityLabel("前の位置へ移動")
                     .disabled(!viewModel.canMoveUp(from: selectedRange))
 
                     Button {
@@ -97,7 +97,7 @@ struct EditorView: View {
                     } label: {
                         Image(systemName: "arrow.down")
                     }
-                    .accessibilityLabel("下に移動")
+                    .accessibilityLabel("次の位置へ移動")
                     .disabled(!viewModel.canMoveDown(from: selectedRange))
 
                     Button {
@@ -105,7 +105,7 @@ struct EditorView: View {
                     } label: {
                         Image(systemName: "arrow.down.to.line")
                     }
-                    .accessibilityLabel("一番下に移動")
+                    .accessibilityLabel("一番下へ移動")
                     .disabled(!viewModel.canMoveDown(from: selectedRange))
                 }
                 .buttonStyle(EditorToolButtonStyle())
@@ -128,7 +128,7 @@ struct EditorView: View {
                 } label: {
                     Image(systemName: "arrow.uturn.backward")
                 }
-                .accessibilityLabel("取り消す")
+                .accessibilityLabel("ひとつ前の操作に戻す")
 
                 Button {
                     applyRedo()
@@ -137,28 +137,53 @@ struct EditorView: View {
                 }
                 .accessibilityLabel("やり直す")
 
-                insertionButton("「」", cursorOffsetFromEnd: 1)
-                insertionButton("（）", cursorOffsetFromEnd: 1)
-                insertionButton("\"\"", cursorOffsetFromEnd: 1)
-                insertionButton("…", inserts: "……")
-                insertionButton("〜")
-                insertionButton("─", inserts: "──")
-                insertionButton("ー", inserts: "ーー")
+                insertionTextButton(
+                    title: "「」",
+                    accessibilityLabel: "かぎかっこを入力",
+                    inserts: "「」",
+                    cursorOffsetFromEnd: 1
+                )
+                insertionTextButton(
+                    title: "（）",
+                    accessibilityLabel: "丸かっこを入力",
+                    inserts: "（）",
+                    cursorOffsetFromEnd: 1
+                )
+                insertionTextButton(
+                    title: "〝〟",
+                    accessibilityLabel: "ダブルミュートを入力",
+                    inserts: "〝〟",
+                    cursorOffsetFromEnd: 1
+                )
+                insertionTextButton(
+                    title: "…",
+                    accessibilityLabel: "三点リーダを入力",
+                    inserts: "……"
+                )
+                insertionTextButton(
+                    title: "〜",
+                    accessibilityLabel: "波線を入力",
+                    inserts: "〜"
+                )
+                insertionTextButton(
+                    title: "―",
+                    accessibilityLabel: "ダッシュを入力",
+                    inserts: "――"
+                )
                 Button {
-                    insertText("# ")
+                    insertChapterTitleMarker()
                 } label: {
-                    ChapterTitleBannerIcon()
-                        .frame(width: 16, height: 13)
+                    Text("#")
                 }
-                .accessibilityLabel("章タイトル")
+                .accessibilityLabel("章タイトルを入力")
                 insertionIconButton(
                     systemImage: "arrow.turn.down.left",
-                    accessibilityLabel: "改ページ",
+                    accessibilityLabel: "改ページを入力",
                     inserts: "\n\(ManuscriptMarkupParser.pageBreakTag)\n"
                 )
                 insertionTextButton(
                     title: "＿",
-                    accessibilityLabel: "全角スペース",
+                    accessibilityLabel: "全角空白を入力",
                     inserts: "　"
                 )
                 Button {
@@ -168,7 +193,7 @@ struct EditorView: View {
                 } label: {
                     Image(systemName: "magnifyingglass")
                 }
-                .accessibilityLabel("検索と置換")
+                .accessibilityLabel("本文を検索")
             }
             .buttonStyle(EditorToolButtonStyle())
         }
@@ -176,12 +201,6 @@ struct EditorView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 2)
         .background(.bar)
-    }
-
-    private func insertionButton(_ title: String, inserts text: String? = nil, cursorOffsetFromEnd: Int = 0) -> some View {
-        Button(title) {
-            insertText(text ?? title, cursorOffsetFromEnd: cursorOffsetFromEnd)
-        }
     }
 
     private func insertionTextButton(
@@ -273,13 +292,15 @@ struct EditorView: View {
     }
 
     private func insertText(_ text: String, cursorOffsetFromEnd: Int = 0) {
-        let insertedRange = viewModel.insert(
-            text,
-            replacing: selectedRange,
+        editorCommand = .insert(
+            UUID(),
+            text: text,
             cursorOffsetFromEnd: cursorOffsetFromEnd
         )
-        selectedRange = insertedRange
-        requestedSelectedRange = insertedRange
+    }
+
+    private func insertChapterTitleMarker() {
+        editorCommand = .insertChapterTitleMarker(UUID())
     }
 
     private func handleScrollDirection(_ direction: ManuscriptTextEditorScrollDirection) {
@@ -314,9 +335,7 @@ struct EditorView: View {
     }
 
     private func moveToBottom() {
-        let range = viewModel.rangeForMovingToBottom()
-        selectedRange = range
-        requestedSelectedRange = range
+        editorCommand = .moveToBottom(UUID())
     }
 
     private func findNext() {
@@ -404,29 +423,6 @@ private struct EditorToolButtonStyle: ButtonStyle {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Color.secondary.opacity(0.10))
                 }
-            }
-    }
-}
-
-private struct ChapterTitleBannerIcon: View {
-    var body: some View {
-        GeometryReader { geometry in
-            let rect = geometry.frame(in: .local)
-            let width = rect.width
-            let height = rect.height
-
-            Path { path in
-                path.move(to: CGPoint(x: rect.minX + width * 0.08, y: rect.minY + height * 0.16))
-                path.addLine(to: CGPoint(x: rect.minX + width * 0.78, y: rect.minY + height * 0.16))
-                path.addLine(to: CGPoint(x: rect.minX + width * 0.96, y: rect.minY + height * 0.50))
-                path.addLine(to: CGPoint(x: rect.minX + width * 0.78, y: rect.minY + height * 0.84))
-                path.addLine(to: CGPoint(x: rect.minX + width * 0.08, y: rect.minY + height * 0.84))
-                path.addLine(to: CGPoint(x: rect.minX + width * 0.24, y: rect.minY + height * 0.50))
-                path.closeSubpath()
-            }
-            .stroke(
-                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-            )
         }
     }
 }

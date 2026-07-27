@@ -1,0 +1,3 @@
+// Release production IDs. Debug and Staging continue to use Google's official test IDs.
+ADMOB_APPLICATION_ID = ca-app-pub-5962190341183783~5710900326
+ADMOB_INTERSTITIAL_AD_UNIT_ID = ca-app-pub-5962190341183783/4969764372

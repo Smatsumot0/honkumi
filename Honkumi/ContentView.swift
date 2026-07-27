@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var documentStore: DocumentStore
     @ObservedObject var proStore: HonkumiProStore
+    let pdfExportAdService: PDFExportAdService
     @State private var showsWorkspace = false
     @State private var presentedSettingsScope: SettingsViewModel.Scope?
     @State private var presentedSettingsInitialTab: SettingsInitialTab = .editor
@@ -27,6 +28,7 @@ struct ContentView: View {
                 WorkspaceView(
                     documentStore: documentStore,
                     proStore: proStore,
+                    pdfExportAdService: pdfExportAdService,
                     presentedSettingsScope: $presentedSettingsScope,
                     presentedSettingsInitialTab: $presentedSettingsInitialTab
                 )
@@ -56,11 +58,24 @@ struct ContentView: View {
         }
         .task {
             proStore.start()
+            pdfExportAdService.updateEntitlementState(proStore.entitlementState)
             await proStore.refreshPurchasedStatus()
             documentStore.setProUnlocked(proStore.isProUnlocked)
+            pdfExportAdService.updateEntitlementState(proStore.entitlementState)
+            if !ProcessInfo.processInfo.isRunningXCTest {
+                Task(priority: .utility) {
+                    await pdfExportAdService.prepareForAppLaunch()
+                }
+            }
         }
-        .onChange(of: proStore.isProUnlocked) { _, isUnlocked in
-            documentStore.setProUnlocked(isUnlocked)
+        .onChange(of: proStore.entitlementState) { _, entitlementState in
+            documentStore.setProUnlocked(entitlementState.isProUnlocked)
+            pdfExportAdService.updateEntitlementState(entitlementState)
+            if !ProcessInfo.processInfo.isRunningXCTest {
+                Task(priority: .utility) {
+                    await pdfExportAdService.preloadAdIfEligible()
+                }
+            }
         }
     }
 }
@@ -68,15 +83,18 @@ struct ContentView: View {
 private struct WorkspaceView: View {
     @ObservedObject var documentStore: DocumentStore
     @ObservedObject var proStore: HonkumiProStore
+    let pdfExportAdService: PDFExportAdService
     @Binding var presentedSettingsScope: SettingsViewModel.Scope?
     @Binding var presentedSettingsInitialTab: SettingsInitialTab
     @StateObject private var editorViewModel: EditorViewModel
     @StateObject private var previewViewModel: PreviewViewModel
+    @State private var pdfExportFlowCoordinator = PDFExportFlowCoordinator()
     @State private var selectedSection: AppSection = .editor
     @State private var editorScrollOffset: CGPoint = .zero
     @State private var editorRequestedSelectedRange: NSRange?
     @State private var isEditorChromeVisible = true
     @State private var preflightResult: PreflightResult?
+    @State private var generatedPDFURL: URL?
     @State private var exportedPDF: ExportedPDF?
     @State private var exportErrorMessage = ""
     @State private var showsExportError = false
@@ -84,16 +102,17 @@ private struct WorkspaceView: View {
 
     private let preflightService = PDFPreflightService()
     private let pdfExportService = PDFExportService()
-    private let pdfExportAdService = PDFExportAdService()
 
     init(
         documentStore: DocumentStore,
         proStore: HonkumiProStore,
+        pdfExportAdService: PDFExportAdService,
         presentedSettingsScope: Binding<SettingsViewModel.Scope?>,
         presentedSettingsInitialTab: Binding<SettingsInitialTab>
     ) {
         self.documentStore = documentStore
         self.proStore = proStore
+        self.pdfExportAdService = pdfExportAdService
         self._presentedSettingsScope = presentedSettingsScope
         self._presentedSettingsInitialTab = presentedSettingsInitialTab
         self._editorViewModel = StateObject(wrappedValue: EditorViewModel(documentStore: documentStore))
@@ -184,6 +203,7 @@ private struct WorkspaceView: View {
             Text(exportErrorMessage)
         }
         .onAppear {
+            previewViewModel.setGenerationSuspended(presentedSettingsScope != nil)
             updatePreviewActivity(for: selectedSection)
         }
         .onDisappear {
@@ -192,6 +212,9 @@ private struct WorkspaceView: View {
         .onChange(of: selectedSection) { _, section in
             isEditorChromeVisible = true
             updatePreviewActivity(for: section)
+        }
+        .onChange(of: presentedSettingsScope?.id) { _, scopeID in
+            previewViewModel.setGenerationSuspended(scopeID != nil)
         }
         .animation(.easeInOut(duration: 0.18), value: isEditorChromeVisible)
     }
@@ -305,25 +328,28 @@ private struct WorkspaceView: View {
 
         let exportDocument = outputDocument(from: document ?? documentStore.document)
         let subscriptionStatus = documentStore.subscriptionStatus
+        let entitlementState = proStore.entitlementState
 
         Task {
-            do {
-                await pdfExportAdService.presentAdIfNeeded(subscriptionStatus: subscriptionStatus)
-                let url = try await pdfExportService.export(
-                    document: exportDocument,
-                    subscriptionStatus: subscriptionStatus
-                )
-                await MainActor.run {
+            await pdfExportFlowCoordinator.exportAndShare(
+                document: exportDocument,
+                subscriptionStatus: subscriptionStatus,
+                entitlementState: entitlementState,
+                pdfExporter: pdfExportService,
+                adPresenter: pdfExportAdService,
+                storeGeneratedURL: { url in
+                    generatedPDFURL = url
+                },
+                share: { url in
                     exportedPDF = ExportedPDF(url: url)
                     isExportingPDF = false
-                }
-            } catch {
-                await MainActor.run {
+                },
+                handleError: { error in
                     exportErrorMessage = error.localizedDescription
                     showsExportError = true
                     isExportingPDF = false
                 }
-            }
+            )
         }
     }
 
@@ -413,5 +439,11 @@ extension SettingsViewModel.Scope: Identifiable {
         case .userDefault:
             "デフォルト設定"
         }
+    }
+}
+
+private extension ProcessInfo {
+    var isRunningXCTest: Bool {
+        environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil
     }
 }

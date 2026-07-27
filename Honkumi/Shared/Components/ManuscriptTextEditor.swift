@@ -4,6 +4,9 @@ import UIKit
 enum ManuscriptTextEditorCommand: Equatable {
     case undo(UUID)
     case redo(UUID)
+    case insert(UUID, text: String, cursorOffsetFromEnd: Int)
+    case insertChapterTitleMarker(UUID)
+    case moveToBottom(UUID)
 }
 
 enum ManuscriptTextEditorScrollDirection: Equatable {
@@ -192,6 +195,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         private var pendingScrollDirectionWorkItem: DispatchWorkItem?
         private var lastScrollDirectionDispatchDate = Date.distantPast
         private var suppressesSelectionScrollingUntil: Date?
+        private var lastPerformedCommand: ManuscriptTextEditorCommand?
         var didRestoreInitialOffset = false
         var needsFullStyleRefresh = true
         var appliedStyleSignature: String?
@@ -257,18 +261,31 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         }
 
         func perform(_ command: ManuscriptTextEditorCommand, in textView: UITextView) {
-            let preservedOffset = textView.contentOffset
+            guard lastPerformedCommand != command else { return }
+            lastPerformedCommand = command
+
             switch command {
             case .undo:
+                let preservedOffset = textView.contentOffset
                 textView.undoManager?.undo()
+                textView.setContentOffset(preservedOffset, animated: false)
+                parent.text = textView.text
+                parent.selectedRange = textView.selectedRange
+                parent.contentOffset = preservedOffset
             case .redo:
+                let preservedOffset = textView.contentOffset
                 textView.undoManager?.redo()
+                textView.setContentOffset(preservedOffset, animated: false)
+                parent.text = textView.text
+                parent.selectedRange = textView.selectedRange
+                parent.contentOffset = preservedOffset
+            case let .insert(_, text, cursorOffsetFromEnd):
+                insert(text, cursorOffsetFromEnd: cursorOffsetFromEnd, in: textView)
+            case .insertChapterTitleMarker:
+                insertChapterTitleMarker(in: textView)
+            case .moveToBottom:
+                moveToBottom(in: textView)
             }
-
-            textView.setContentOffset(preservedOffset, animated: false)
-            parent.text = textView.text
-            parent.selectedRange = textView.selectedRange
-            parent.contentOffset = preservedOffset
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -436,6 +453,34 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             textView.allowsAutomaticSelectionScrolling = previousValue
         }
 
+        private func moveToBottom(in textView: UITextView) {
+            textView.unmarkText()
+            textView.layoutIfNeeded()
+
+            let range = ManuscriptTextEditorNavigation.bottomSelectionRange(for: textView.text)
+            applySelection(range, to: textView)
+
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                textView.layoutIfNeeded()
+                let target = CGPoint(
+                    x: textView.contentOffset.x,
+                    y: ManuscriptTextEditorNavigation.maximumContentOffsetY(
+                        contentHeight: textView.contentSize.height,
+                        viewportHeight: textView.bounds.height,
+                        adjustedInsetTop: textView.adjustedContentInset.top,
+                        adjustedInsetBottom: textView.adjustedContentInset.bottom
+                    )
+                )
+                textView.setContentOffset(target, animated: false)
+                self.parent.selectedRange = range
+                self.parent.requestedSelectedRange = nil
+                self.parent.contentOffset = target
+                self.keyboardTransitionOffset = target
+                self.lastScrollOffsetY = target.y
+            }
+        }
+
         private func commitTextChange(from textView: UITextView) {
             let originalText = textView.text ?? ""
             let originalSelection = textView.selectedRange
@@ -443,6 +488,54 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             if parent.selectedRange != originalSelection {
                 parent.selectedRange = originalSelection
             }
+        }
+
+        private func insert(
+            _ text: String,
+            cursorOffsetFromEnd: Int,
+            in textView: UITextView
+        ) {
+            textView.becomeFirstResponder()
+            textView.unmarkText()
+
+            let result = ManuscriptTextInsertion.applying(
+                text,
+                to: textView.text ?? "",
+                replacing: textView.selectedRange,
+                cursorOffsetFromEnd: cursorOffsetFromEnd
+            )
+
+            applyInsertionResult(result, in: textView)
+        }
+
+        private func insertChapterTitleMarker(in textView: UITextView) {
+            textView.becomeFirstResponder()
+            textView.unmarkText()
+
+            let result = ManuscriptTextInsertion.applyingChapterTitleMarker(
+                to: textView.text ?? "",
+                replacing: textView.selectedRange
+            )
+
+            applyInsertionResult(result, in: textView)
+        }
+
+        private func applyInsertionResult(
+            _ result: ManuscriptTextInsertionResult,
+            in textView: UITextView
+        ) {
+            isApplyingTextChange = true
+            textView.text = result.text
+            textView.selectedRange = result.selectedRange
+            needsFullStyleRefresh = true
+            isApplyingTextChange = false
+
+            parent.text = result.text
+            parent.selectedRange = result.selectedRange
+            allowingAutomaticSelectionScrolling(in: textView) {
+                revealSelectionIfNeeded(result.selectedRange, in: textView, savesOffset: true)
+            }
+            saveContentOffset(from: textView)
         }
 
         private func applyFormatIfNeeded(to textView: UITextView) {
@@ -571,7 +664,12 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             let minX = -inset.left
             let minY = -inset.top
             let maxX = max(textView.contentSize.width - textView.bounds.width + inset.right, minX)
-            let maxY = max(textView.contentSize.height - textView.bounds.height + inset.bottom, minY)
+            let maxY = ManuscriptTextEditorNavigation.maximumContentOffsetY(
+                contentHeight: textView.contentSize.height,
+                viewportHeight: textView.bounds.height,
+                adjustedInsetTop: inset.top,
+                adjustedInsetBottom: inset.bottom
+            )
             return CGPoint(
                 x: min(max(offset.x, minX), maxX),
                 y: min(max(offset.y, minY), maxY)

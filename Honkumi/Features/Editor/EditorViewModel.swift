@@ -102,19 +102,18 @@ final class EditorViewModel: ObservableObject {
     }
 
     func rangeForMovingToBottom() -> NSRange {
-        NSRange(location: (document.body as NSString).length, length: 0)
+        ManuscriptTextEditorNavigation.bottomSelectionRange(for: document.body)
     }
 
     func insert(_ text: String, replacing selectedRange: NSRange, cursorOffsetFromEnd: Int = 0) -> NSRange {
-        let currentBody = document.body
-        let nsBody = currentBody as NSString
-        let safeRange = clampedRange(selectedRange, in: nsBody)
-        let updatedBody = nsBody.replacingCharacters(in: safeRange, with: text)
-        updateBody(updatedBody)
-
-        let insertedLength = (text as NSString).length
-        let cursorLocation = safeRange.location + max(insertedLength - cursorOffsetFromEnd, 0)
-        return NSRange(location: cursorLocation, length: 0)
+        let result = ManuscriptTextInsertion.applying(
+            text,
+            to: document.body,
+            replacing: selectedRange,
+            cursorOffsetFromEnd: cursorOffsetFromEnd
+        )
+        updateBody(result.text)
+        return result.selectedRange
     }
 
     func updateBody(_ newBody: String) {

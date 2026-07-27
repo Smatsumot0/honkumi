@@ -20,7 +20,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "honkumi.pro",
+      "productID" : "app.honkumi.pro",
       "referenceName" : "Honkumi Pro",
       "type" : "NonConsumable"
     }

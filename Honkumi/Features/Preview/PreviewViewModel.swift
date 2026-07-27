@@ -73,6 +73,10 @@ nonisolated enum ManuscriptPaginator {
     private static let maxTableOfContentsPasses = 6
 
     static func pages(for document: ManuscriptDocument) -> [PreviewPage] {
+        #if DEBUG
+        ManuscriptPaginatorInstrumentation.recordPagesCall()
+        #endif
+
         let settings = document.settings.validated
         let parsedSegments = ManuscriptMarkupParser.parse(document.body).segments
         let segments = normalizedSegments(parsedSegments, settings: settings)
@@ -269,22 +273,30 @@ nonisolated enum ManuscriptPaginator {
     }
 
     private static func chapterEntries(in pages: [PreviewPage], settings: EditorSettings) -> [TableOfContentsEntry] {
-        var pageNumber = settings.pageNumberStart
-        var entries: [TableOfContentsEntry] = []
-
-        for page in pages {
-            switch page.kind {
-            case .body:
-                entries.append(contentsOf: page.chapterTitlesStartingOnPage.map { title in
-                    TableOfContentsEntry(title: title, pageNumber: pageNumber)
-                })
-                pageNumber += 1
-            case .tableOfContents, .colophon:
-                continue
-            }
+        let sourcePages = pages.map { page in
+            TableOfContentsPageNumberSourcePage(
+                kind: pageNumberContentKind(for: page),
+                chapterTitlesStartingOnPage: page.chapterTitlesStartingOnPage
+            )
         }
 
-        return entries
+        return TableOfContentsPageNumberPolicy.entries(
+            for: sourcePages,
+            settings: settings
+        ).map { entry in
+            TableOfContentsEntry(title: entry.title, pageNumber: entry.pageNumber)
+        }
+    }
+
+    private static func pageNumberContentKind(for page: PreviewPage) -> PDFPageNumberContentKind {
+        switch page.kind {
+        case .body:
+            .body
+        case .tableOfContents:
+            .tableOfContents
+        case .colophon:
+            .colophon
+        }
     }
 
     private static func appendingColophonIfNeeded(
@@ -754,6 +766,31 @@ nonisolated enum ManuscriptPaginator {
     ]
 }
 
+#if DEBUG
+nonisolated enum ManuscriptPaginatorInstrumentation {
+    private static let lock = NSLock()
+    private static var count = 0
+
+    static var pagesCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    static func reset() {
+        lock.lock()
+        count = 0
+        lock.unlock()
+    }
+
+    static func recordPagesCall() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+}
+#endif
+
 nonisolated struct TableOfContentsEntry: Equatable {
     let title: String
     let pageNumber: Int
@@ -781,11 +818,12 @@ final class PreviewViewModel: ObservableObject {
     @Published private(set) var generationErrorMessage: String?
 
     private let documentStore: DocumentStore
-    private let pdfExportService = PDFExportService()
+    private let pdfExporter: PreviewPDFExporting
     private var cancellables = Set<AnyCancellable>()
     private var generationTask: Task<Void, Never>?
     private var generation = 0
     private var isPreviewActive = false
+    private var isGenerationSuspended = false
     private var activePreviewKind: PreviewPDFKind = .normal
     private var activeGenerationCacheKey: PreviewPDFCacheKey?
     private var displayedPreviewCacheKey: PreviewPDFCacheKey?
@@ -793,8 +831,12 @@ final class PreviewViewModel: ObservableObject {
     private var previewPDFCacheAccessOrder: [PreviewPDFCacheKey] = []
     private let previewPDFCacheLimit = 4
 
-    init(documentStore: DocumentStore) {
+    init(
+        documentStore: DocumentStore,
+        pdfExporter: PreviewPDFExporting = PDFExportService()
+    ) {
         self.documentStore = documentStore
+        self.pdfExporter = pdfExporter
         self.document = documentStore.document.applyingPublisherInfo(from: documentStore.userDefaultSettings)
 
         documentStore.$document
@@ -802,7 +844,7 @@ final class PreviewViewModel: ObservableObject {
                 guard let self else { return }
                 let previewDocument = self.previewDocument(from: document)
                 self.document = previewDocument
-                if self.isPreviewActive {
+                if self.isPreviewActive && !self.isGenerationSuspended {
                     self.preparePreview(
                         for: previewDocument,
                         kind: self.activePreviewKind,
@@ -823,7 +865,7 @@ final class PreviewViewModel: ObservableObject {
                 guard let self else { return }
                 let previewDocument = self.previewDocument(from: self.documentStore.document)
                 self.document = previewDocument
-                guard self.isPreviewActive else { return }
+                guard self.isPreviewActive, !self.isGenerationSuspended else { return }
                 self.preparePreview(
                     for: previewDocument,
                     kind: self.activePreviewKind,
@@ -860,7 +902,7 @@ final class PreviewViewModel: ObservableObject {
 
         if activePreviewKind != kind {
             activePreviewKind = kind
-            guard isPreviewActive else { return }
+            guard isPreviewActive, !isGenerationSuspended else { return }
             preparePreview(
                 for: previewDocument,
                 kind: kind,
@@ -869,7 +911,7 @@ final class PreviewViewModel: ObservableObject {
             return
         }
 
-        guard isPreviewActive else { return }
+        guard isPreviewActive, !isGenerationSuspended else { return }
         preparePreview(
             for: previewDocument,
             kind: kind,
@@ -896,11 +938,25 @@ final class PreviewViewModel: ObservableObject {
         }
     }
 
+    func setGenerationSuspended(_ isSuspended: Bool) {
+        guard isGenerationSuspended != isSuspended else { return }
+        isGenerationSuspended = isSuspended
+
+        if isSuspended {
+            cancelInactiveGeneration()
+            return
+        }
+
+        guard isPreviewActive else { return }
+        preparePreviewIfNeeded(for: activePreviewKind)
+    }
+
     private func preparePreview(
         for document: ManuscriptDocument,
         kind: PreviewPDFKind,
         debounceMilliseconds: UInt64
     ) {
+        guard isPreviewActive, !isGenerationSuspended else { return }
         let subscriptionStatus = documentStore.subscriptionStatus
         let cacheKey = Self.cacheKey(for: document, kind: kind, subscriptionStatus: subscriptionStatus)
 
@@ -944,12 +1000,13 @@ final class PreviewViewModel: ObservableObject {
         cacheKey: PreviewPDFCacheKey,
         debounceMilliseconds: UInt64
     ) {
+        guard isPreviewActive, !isGenerationSuspended else { return }
         generationTask?.cancel()
         generation += 1
         let generationID = generation
         let documentSnapshot = document
         let previewKind = kind
-        let pdfExportService = pdfExportService
+        let pdfExporter = pdfExporter
         activeGenerationCacheKey = cacheKey
         isGeneratingPDF = true
         generationErrorMessage = nil
@@ -962,7 +1019,12 @@ final class PreviewViewModel: ObservableObject {
                 }
 
                 try Task.checkCancellation()
-                let outputURL = try await pdfExportService.exportPreviewPDF(
+                guard let self,
+                      self.isPreviewActive,
+                      !self.isGenerationSuspended else {
+                    throw CancellationError()
+                }
+                let outputURL = try await pdfExporter.exportPreviewPDF(
                     document: documentSnapshot,
                     subscriptionStatus: subscriptionStatus,
                     previewKind: previewKind,
@@ -972,7 +1034,7 @@ final class PreviewViewModel: ObservableObject {
                 try Self.validateGeneratedPDF(at: outputURL)
                 try Task.checkCancellation()
 
-                self?.applyGeneratedPDF(
+                self.applyGeneratedPDF(
                     at: outputURL,
                     generation: generationID,
                     cacheKey: cacheKey,
@@ -1009,7 +1071,8 @@ final class PreviewViewModel: ObservableObject {
                 kind: kind,
                 subscriptionStatus: documentStore.subscriptionStatus
               ) == cacheKey,
-              isPreviewActive else {
+              isPreviewActive,
+              !isGenerationSuspended else {
             cleanupPreviewPDF(at: url)
             return
         }
@@ -1037,7 +1100,8 @@ final class PreviewViewModel: ObservableObject {
                 kind: kind,
                 subscriptionStatus: documentStore.subscriptionStatus
               ) == cacheKey,
-              isPreviewActive else { return }
+              isPreviewActive,
+              !isGenerationSuspended else { return }
         activeGenerationCacheKey = nil
         let previousURL = previewPDFURL
         previewPDFURL = nil

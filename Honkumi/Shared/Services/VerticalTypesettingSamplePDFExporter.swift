@@ -5,48 +5,73 @@ import Foundation
 nonisolated enum VerticalTypesettingSamplePDFExporter {
     static func exportIfRequested() {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["HONKUMI_EXPORT_VERTICAL_TYPESETTING_SAMPLES"] == "1" else { return }
+        let exportsVerticalSamples =
+            environment["HONKUMI_EXPORT_VERTICAL_TYPESETTING_SAMPLES"] == "1"
+        let exportsRecommendedSamples =
+            environment["HONKUMI_EXPORT_RECOMMENDED_SETTING_SAMPLES"] == "1"
+        let exportsFontSizeSamples =
+            environment["HONKUMI_EXPORT_FONT_SIZE_SAMPLES"] == "1"
+        guard exportsVerticalSamples || exportsRecommendedSamples || exportsFontSizeSamples else {
+            return
+        }
 
         do {
-            let destinationDirectory = try sampleOutputDirectory()
             let exporter = BodyPDFExportService()
-            let publisherSettings = samplePublisherSettings()
 
-            for document in sampleDocuments() {
-                let outputDocument = document.applyingPublisherInfo(from: publisherSettings)
-                let temporaryURL = try exporter.export(document: outputDocument, subscriptionStatus: .free)
-                let outputURL = destinationDirectory
-                    .appendingPathComponent(document.title)
-                    .appendingPathExtension("pdf")
-                try? FileManager.default.removeItem(at: outputURL)
-                try FileManager.default.copyItem(at: temporaryURL, to: outputURL)
-                print("Exported vertical typesetting sample PDF:", outputURL.path)
+            if exportsVerticalSamples {
+                let destinationDirectory = try sampleOutputDirectory()
+                let publisherSettings = samplePublisherSettings()
 
-                let spreadPreviewURL = try exporter.exportPreviewPDF(
-                    document: outputDocument,
-                    subscriptionStatus: .free,
-                    previewKind: .spread,
-                    generationID: UUID()
-                )
-                let spreadOutputURL = destinationDirectory
-                    .appendingPathComponent(document.title + " 見開きプレビュー")
-                    .appendingPathExtension("pdf")
-                try? FileManager.default.removeItem(at: spreadOutputURL)
-                try FileManager.default.copyItem(at: spreadPreviewURL, to: spreadOutputURL)
-                print("Exported spread preview sample PDF:", spreadOutputURL.path)
+                for document in sampleDocuments() {
+                    let outputDocument = document.applyingPublisherInfo(from: publisherSettings)
+                    let temporaryURL = try exporter.export(document: outputDocument, subscriptionStatus: .free)
+                    let outputURL = destinationDirectory
+                        .appendingPathComponent(document.title)
+                        .appendingPathExtension("pdf")
+                    try? FileManager.default.removeItem(at: outputURL)
+                    try FileManager.default.copyItem(at: temporaryURL, to: outputURL)
+                    print("Exported vertical typesetting sample PDF:", outputURL.path)
+
+                    let spreadPreviewURL = try exporter.exportPreviewPDF(
+                        document: outputDocument,
+                        subscriptionStatus: .free,
+                        previewKind: .spread,
+                        generationID: UUID()
+                    )
+                    let spreadOutputURL = destinationDirectory
+                        .appendingPathComponent(document.title + " 見開きプレビュー")
+                        .appendingPathExtension("pdf")
+                    try? FileManager.default.removeItem(at: spreadOutputURL)
+                    try FileManager.default.copyItem(at: spreadPreviewURL, to: spreadOutputURL)
+                    print("Exported spread preview sample PDF:", spreadOutputURL.path)
+                }
+
+                if environment["HONKUMI_EXPORT_COLOPHON_REGRESSION_SAMPLES"] == "1" {
+                    try exportColophonRegressionSamples(
+                        exporter: exporter,
+                        to: destinationDirectory
+                    )
+                }
+
+                if environment["HONKUMI_EXPORT_ALL_FONT_SAMPLES"] == "1" {
+                    try exportAllFontSamples(
+                        exporter: exporter,
+                        publisherSettings: publisherSettings
+                    )
+                }
             }
 
-            if environment["HONKUMI_EXPORT_COLOPHON_REGRESSION_SAMPLES"] == "1" {
-                try exportColophonRegressionSamples(
-                    exporter: exporter,
-                    to: destinationDirectory
+            if exportsRecommendedSamples {
+                try export(
+                    PrintSettingSampleManifest.recommendedSettingCases().map(\.output),
+                    exporter: exporter
                 )
             }
 
-            if environment["HONKUMI_EXPORT_ALL_FONT_SAMPLES"] == "1" {
-                try exportAllFontSamples(
-                    exporter: exporter,
-                    publisherSettings: publisherSettings
+            if exportsFontSizeSamples {
+                try export(
+                    PrintSettingSampleManifest.fontSizeCases(),
+                    exporter: exporter
                 )
             }
 
@@ -59,6 +84,39 @@ nonisolated enum VerticalTypesettingSamplePDFExporter {
                 exit(1)
             }
         }
+    }
+
+    private static func export(
+        _ samples: [PrintSettingSampleCase],
+        exporter: BodyPDFExportService
+    ) throws {
+        for sample in samples {
+            let directory = try outputDirectory(named: sample.outputDirectoryName)
+            let temporaryURL = try exporter.export(
+                document: sample.document,
+                subscriptionStatus: .free
+            )
+            let outputURL = directory.appendingPathComponent(sample.fileName)
+            try? FileManager.default.removeItem(at: outputURL)
+            try FileManager.default.copyItem(at: temporaryURL, to: outputURL)
+            print("Exported print-setting sample PDF:", outputURL.path)
+        }
+    }
+
+    private static func outputDirectory(named name: String) throws -> URL {
+        let documentsDirectory = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0]
+        let outputDirectory = documentsDirectory.appendingPathComponent(
+            name,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: outputDirectory,
+            withIntermediateDirectories: true
+        )
+        return outputDirectory
     }
 
     private static func sampleOutputDirectory() throws -> URL {
