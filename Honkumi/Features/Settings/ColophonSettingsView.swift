@@ -1,6 +1,7 @@
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct ColophonSettingsView: View {
     enum Mode {
@@ -13,6 +14,8 @@ struct ColophonSettingsView: View {
     @ObservedObject var proStore: HonkumiProStore
 
     @State private var selectedCircleImageItem: PhotosPickerItem?
+    @State private var isCircleImageFileImporterPresented = false
+    @State private var circleImageImportErrorMessage: String?
     @State private var isProPurchasePresented = false
     @State private var presentedProFeature: HonkumiProFeature?
 
@@ -27,7 +30,30 @@ struct ColophonSettingsView: View {
         }
         .listSectionSpacing(.compact)
         .onChange(of: selectedCircleImageItem) { _, item in
-            loadImageData(from: item, keyPath: \.circleImageData)
+            loadImageData(from: item)
+        }
+        .fileImporter(
+            isPresented: $isCircleImageFileImporterPresented,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false,
+            onCompletion: handleCircleImageFileImport
+        )
+        .alert(
+            "画像を読み込めませんでした",
+            isPresented: Binding(
+                get: { circleImageImportErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        circleImageImportErrorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                circleImageImportErrorMessage = nil
+            }
+        } message: {
+            Text(circleImageImportErrorMessage ?? "")
         }
         .sheet(isPresented: $isProPurchasePresented) {
             HonkumiProPurchaseView(proStore: proStore, feature: presentedProFeature)
@@ -127,8 +153,16 @@ struct ColophonSettingsView: View {
             HStack {
                 imagePreview(data: imageData)
 
-                PhotosPicker(selection: $selectedCircleImageItem, matching: .images) {
-                    Label("サークルロゴ画像をインポート", systemImage: "photo.badge.plus")
+                VStack(alignment: .leading, spacing: 8) {
+                    PhotosPicker(selection: $selectedCircleImageItem, matching: .images) {
+                        Label("写真から選択", systemImage: "photo.badge.plus")
+                    }
+
+                    Button {
+                        isCircleImageFileImporterPresented = true
+                    } label: {
+                        Label("ファイルから選択", systemImage: "folder")
+                    }
                 }
 
                 Spacer()
@@ -204,19 +238,42 @@ struct ColophonSettingsView: View {
         )
     }
 
-    private func loadImageData(
-        from item: PhotosPickerItem?,
-        keyPath: WritableKeyPath<ColophonSettings, Data?>
-    ) {
+    private func loadImageData(from item: PhotosPickerItem?) {
         guard let item else { return }
 
         Task {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-            await MainActor.run {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw CircleLogoImageImportError.invalidImage
+                }
+                let validatedData = try CircleLogoImageImporter.validatedImageData(data)
                 viewModel.updateColophon { colophon in
-                    colophon[keyPath: keyPath] = data
+                    colophon.circleImageData = validatedData
+                }
+            } catch {
+                circleImageImportErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func handleCircleImageFileImport(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+
+            Task {
+                do {
+                    let data = try await Task.detached {
+                        try CircleLogoImageImporter.loadImageData(from: url)
+                    }.value
+                    viewModel.updateColophon { colophon in
+                        colophon.circleImageData = data
+                    }
+                } catch {
+                    circleImageImportErrorMessage = error.localizedDescription
                 }
             }
+        } catch {
+            circleImageImportErrorMessage = error.localizedDescription
         }
     }
 
