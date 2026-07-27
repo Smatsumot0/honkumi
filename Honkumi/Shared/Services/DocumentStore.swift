@@ -11,10 +11,17 @@ final class DocumentStore: ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let userDefaults: UserDefaults
+    private let encodeOperation: AppDataPersistenceEncoder.EncodeOperation
     private var pendingSaveTask: Task<Void, Never>?
+    private var saveGeneration = 0
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        encodeOperation: @escaping AppDataPersistenceEncoder.EncodeOperation =
+            AppDataPersistenceEncoder.encode
+    ) {
         self.userDefaults = userDefaults
+        self.encodeOperation = encodeOperation
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
         let loadedData: AppData
@@ -67,6 +74,7 @@ final class DocumentStore: ObservableObject {
 
     init(appData: AppData) {
         self.userDefaults = .standard
+        self.encodeOperation = AppDataPersistenceEncoder.encode
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let loadedData = Self.normalized(Self.migrate(appData))
         self.appData = loadedData
@@ -253,12 +261,24 @@ final class DocumentStore: ObservableObject {
 
     private func scheduleSave() {
         pendingSaveTask?.cancel()
+        saveGeneration += 1
+        let generation = saveGeneration
+        let appDataSnapshot = appData
+        let operation = encodeOperation
+
         pendingSaveTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self?.save()
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
             }
+            guard !Task.isCancelled else { return }
+            guard let encodedData = await operation(appDataSnapshot) else { return }
+            guard !Task.isCancelled,
+                  let self,
+                  saveGeneration == generation else { return }
+
+            userDefaults.set(encodedData, forKey: storageKey)
         }
     }
 
