@@ -93,6 +93,28 @@ nonisolated struct PDFPreflightService {
         let parsed = ManuscriptMarkupParser.parse(effectiveDocument.body)
         let pages = paginationResult.pages
         var issues: [PreflightIssue] = []
+        let normalizationReport = ManuscriptRenderPipeline.printTextNormalizationReport(
+            for: checkedDocument,
+            subscriptionStatus: subscriptionStatus
+        )
+
+        if normalizationReport.totalReplacementCount > 0 {
+            issues.append(warning(
+                id: "print.textNormalization.emoji",
+                title: "絵文字を印刷用文字に置換します",
+                message: """
+                対象は合計\(normalizationReport.totalReplacementCount)件です。\
+                未対応絵文字\(normalizationReport.unsupportedEmojiReplacementCount)件を□へ、\
+                ハート\(normalizationReport.heartReplacementCount)件を♡へ置換してPDFを生成します。
+                """,
+                location: .init(
+                    type: .text,
+                    pageNumber: nil,
+                    characterRange: nil,
+                    settingKey: nil
+                )
+            ))
+        }
 
         checkBody(
             effectiveDocument.body,

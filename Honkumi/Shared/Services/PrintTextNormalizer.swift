@@ -159,20 +159,31 @@ nonisolated enum PrintTextNormalizer {
     }
 
     private static func colophonTextFields(from colophon: ColophonSettings) -> [(label: String, value: String)] {
+        guard colophon.isEnabled else {
+            return []
+        }
+
         var fields: [(label: String, value: String)] = [
-            ("作品名", colophon.workTitle),
-            ("発行者", colophon.publisherName),
-            ("作者", colophon.authorName),
-            ("サークル", colophon.circleName),
-            ("HP", colophon.websiteURL),
+            ("作品名", colophon.workTitle)
+        ]
+        if colophon.showsAuthorName {
+            fields.append(("作者", colophon.authorName))
+        }
+        if colophon.showsCircleName {
+            fields.append(("サークル", colophon.circleName))
+        }
+        if colophon.showsPrinterName {
+            fields.append(("印刷所", colophon.printerName))
+        }
+        if colophon.showsWebsiteURL || colophon.showsQRCode {
+            fields.append(("HP", colophon.websiteURL))
+        }
+        fields.append(contentsOf: [
             ("x", colophon.xURL),
             ("pixiv", colophon.pixivURL),
             ("連絡先", colophon.contact),
             ("その他", colophon.notes)
-        ]
-        if colophon.showsPrinterName {
-            fields.insert(("印刷所", colophon.printerName), at: 4)
-        }
+        ])
         return fields
     }
 
