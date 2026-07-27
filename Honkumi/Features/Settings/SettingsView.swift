@@ -123,7 +123,17 @@ struct SettingsView: View {
                 }
 
                 if usesRecommendedTypography {
-                    LabeledContent("想定ページ数", value: "\(viewModel.estimatedPrintPageCount)ページ")
+                    LabeledContent {
+                        HStack(spacing: 8) {
+                            if viewModel.isCalculatingPrintSettings {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text("\(viewModel.estimatedPrintPageCount)ページ")
+                        }
+                    } label: {
+                        Text("想定ページ数")
+                    }
                 }
 
                 NavigationLink {

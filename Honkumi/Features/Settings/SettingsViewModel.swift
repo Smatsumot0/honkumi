@@ -8,6 +8,10 @@ final class SettingsViewModel: ObservableObject {
         _ settings: FormatSettings,
         _ options: FormatOptions
     ) async -> String
+    typealias PrintSnapshotOperation = @Sendable (
+        _ body: String,
+        _ settings: EditorSettings
+    ) async -> PrintSettingsDisplaySnapshot
 
     enum Scope {
         case activeWork
@@ -17,30 +21,77 @@ final class SettingsViewModel: ObservableObject {
     @Published private(set) var document: ManuscriptDocument
     @Published private(set) var userDefaultSettings: EditorSettings
     @Published private(set) var isApplyingFormat = false
+    @Published private(set) var isCalculatingPrintSettings = false
+    @Published private var printSettingsSnapshot: PrintSettingsDisplaySnapshot
 
     private let documentStore: DocumentStore
     private let scope: Scope
     private let formatOperation: FormatOperation
+    private let printSnapshotOperation: PrintSnapshotOperation
+    private var cancellables = Set<AnyCancellable>()
     private var formatTask: Task<Void, Never>?
     private var formatGeneration = 0
+    private var printSnapshotTask: Task<Void, Never>?
+    private var printSnapshotGeneration = 0
+    private var printSnapshotSource: PrintSnapshotSource
+    private var requestedPrintSnapshotSource: PrintSnapshotSource?
 
     init(
         documentStore: DocumentStore,
         scope: Scope = .activeWork,
-        formatOperation: @escaping FormatOperation = SettingsViewModel.defaultFormatOperation
+        formatOperation: @escaping FormatOperation = SettingsViewModel.defaultFormatOperation,
+        printSnapshotOperation: @escaping PrintSnapshotOperation =
+            SettingsViewModel.defaultPrintSnapshotOperation
     ) {
+        let initialDocument = documentStore.document
+        let initialUserDefaultSettings = documentStore.userDefaultSettings
+        let initialSettings: EditorSettings
+        switch scope {
+        case .activeWork:
+            initialSettings = initialDocument.settings
+        case .userDefault:
+            initialSettings = initialUserDefaultSettings
+        }
+        let initialPrintSource = PrintSnapshotSource(
+            body: initialDocument.body,
+            settings: initialSettings.validated
+        )
+
         self.documentStore = documentStore
         self.scope = scope
         self.formatOperation = formatOperation
-        self.document = documentStore.document
-        self.userDefaultSettings = documentStore.userDefaultSettings
+        self.printSnapshotOperation = printSnapshotOperation
+        self.document = initialDocument
+        self.userDefaultSettings = initialUserDefaultSettings
+        self.printSettingsSnapshot = .initial(settings: initialSettings)
+        self.printSnapshotSource = initialPrintSource
 
         documentStore.$document
-            .assign(to: &$document)
+            .dropFirst()
+            .sink { [weak self] document in
+                guard let self else { return }
+                self.document = document
+                self.schedulePrintSnapshotRefresh()
+            }
+            .store(in: &cancellables)
 
         documentStore.$appData
             .map(\.userDefaultSettings)
-            .assign(to: &$userDefaultSettings)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] settings in
+                guard let self else { return }
+                self.userDefaultSettings = settings
+                self.schedulePrintSnapshotRefresh()
+            }
+            .store(in: &cancellables)
+
+        schedulePrintSnapshotRefresh()
+    }
+
+    deinit {
+        formatTask?.cancel()
+        printSnapshotTask?.cancel()
     }
 
     var settings: EditorSettings {
@@ -83,17 +134,14 @@ final class SettingsViewModel: ObservableObject {
     }
 
     var printSettingsForDisplay: EditorSettings {
-        RecommendedPrintSettings.effectiveSettings(
-            body: printRecommendationBody,
-            settings: settings
-        )
+        guard printSnapshotSource == currentPrintSnapshotSource else {
+            return settings.validated
+        }
+        return printSettingsSnapshot.settings
     }
 
     var estimatedPrintPageCount: Int {
-        RecommendedPrintSettings.estimatedPageCount(
-            body: printRecommendationBody,
-            settings: printSettingsForDisplay
-        )
+        printSettingsSnapshot.estimatedPageCount
     }
 
     var isPrintRecommendationAvailable: Bool {
@@ -105,10 +153,10 @@ final class SettingsViewModel: ObservableObject {
     }
 
     var showsWideGutterRecommendationNote: Bool {
-        RecommendedPrintSettings.shouldShowWideGutterNote(
-            body: printRecommendationBody,
-            settings: settings
-        )
+        guard printSnapshotSource == currentPrintSnapshotSource else {
+            return false
+        }
+        return printSettingsSnapshot.showsWideGutterNote
     }
 
     var wideGutterRecommendationNote: String {
@@ -122,6 +170,13 @@ final class SettingsViewModel: ObservableObject {
         case .userDefault:
             document.body
         }
+    }
+
+    private var currentPrintSnapshotSource: PrintSnapshotSource {
+        PrintSnapshotSource(
+            body: printRecommendationBody,
+            settings: settings.validated
+        )
     }
 
     func updateUseRecommendedTypography(_ value: Bool) {
@@ -404,6 +459,32 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
+    private func schedulePrintSnapshotRefresh() {
+        let source = currentPrintSnapshotSource
+        guard requestedPrintSnapshotSource != source else { return }
+
+        printSnapshotTask?.cancel()
+        printSnapshotGeneration += 1
+        let generation = printSnapshotGeneration
+        requestedPrintSnapshotSource = source
+        isCalculatingPrintSettings = true
+        let operation = printSnapshotOperation
+
+        printSnapshotTask = Task { [weak self] in
+            let snapshot = await operation(source.body, source.settings)
+            guard let self else { return }
+            guard !Task.isCancelled,
+                  printSnapshotGeneration == generation,
+                  currentPrintSnapshotSource == source else {
+                return
+            }
+
+            printSnapshotSource = source
+            printSettingsSnapshot = snapshot
+            isCalculatingPrintSettings = false
+        }
+    }
+
     nonisolated static func defaultFormatOperation(
         text: String,
         settings: FormatSettings,
@@ -417,4 +498,21 @@ final class SettingsViewModel: ObservableObject {
             )
         }.value
     }
+
+    nonisolated static func defaultPrintSnapshotOperation(
+        body: String,
+        settings: EditorSettings
+    ) async -> PrintSettingsDisplaySnapshot {
+        await Task.detached(priority: .utility) {
+            PrintSettingsDisplaySnapshot.calculate(
+                body: body,
+                settings: settings
+            )
+        }.value
+    }
+}
+
+private nonisolated struct PrintSnapshotSource: Equatable {
+    let body: String
+    let settings: EditorSettings
 }
