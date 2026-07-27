@@ -3,6 +3,12 @@ import Foundation
 
 @MainActor
 final class SettingsViewModel: ObservableObject {
+    typealias FormatOperation = @Sendable (
+        _ text: String,
+        _ settings: FormatSettings,
+        _ options: FormatOptions
+    ) async -> String
+
     enum Scope {
         case activeWork
         case userDefault
@@ -10,13 +16,22 @@ final class SettingsViewModel: ObservableObject {
 
     @Published private(set) var document: ManuscriptDocument
     @Published private(set) var userDefaultSettings: EditorSettings
+    @Published private(set) var isApplyingFormat = false
 
     private let documentStore: DocumentStore
     private let scope: Scope
+    private let formatOperation: FormatOperation
+    private var formatTask: Task<Void, Never>?
+    private var formatGeneration = 0
 
-    init(documentStore: DocumentStore, scope: Scope = .activeWork) {
+    init(
+        documentStore: DocumentStore,
+        scope: Scope = .activeWork,
+        formatOperation: @escaping FormatOperation = SettingsViewModel.defaultFormatOperation
+    ) {
         self.documentStore = documentStore
         self.scope = scope
+        self.formatOperation = formatOperation
         self.document = documentStore.document
         self.userDefaultSettings = documentStore.userDefaultSettings
 
@@ -332,7 +347,7 @@ final class SettingsViewModel: ObservableObject {
         changes(&updated.formatSettings)
         settings = updated
 
-        applyFormatIfAutoFormatWasEnabled(previousSettings: previousSettings, updatedSettings: updated)
+        scheduleFormatApplication(previousSettings: previousSettings, updatedSettings: updated)
     }
 
     func updateFormatRule(_ keyPath: WritableKeyPath<FormatSettings, Bool>, isEnabled: Bool) {
@@ -341,21 +356,65 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
-    private func applyFormatIfAutoFormatWasEnabled(
+    private func scheduleFormatApplication(
         previousSettings: EditorSettings,
         updatedSettings: EditorSettings
     ) {
         guard scope == .activeWork else { return }
-        guard !previousSettings.formatSettings.enableAutoFormat,
-              updatedSettings.formatSettings.enableAutoFormat else { return }
+        guard previousSettings.formatSettings != updatedSettings.formatSettings else { return }
 
-        let formattedBody = ManuscriptFormatter.formatManuscriptText(
-            document.body,
-            settings: updatedSettings.validated.formatSettings,
-            options: FormatOptions(isPremiumUser: isPremiumUser)
-        )
-        guard formattedBody != document.body else { return }
+        formatTask?.cancel()
+        formatGeneration += 1
+        let generation = formatGeneration
 
-        documentStore.updateBody(formattedBody)
+        guard updatedSettings.formatSettings.enableAutoFormat else {
+            isApplyingFormat = false
+            return
+        }
+
+        let sourceDocument = documentStore.document
+        let sourceFormatSettings = updatedSettings.validated.formatSettings
+        let sourceOptions = FormatOptions(isPremiumUser: isPremiumUser)
+        let operation = formatOperation
+        isApplyingFormat = true
+
+        formatTask = Task { [weak self] in
+            let formattedBody = await operation(
+                sourceDocument.body,
+                sourceFormatSettings,
+                sourceOptions
+            )
+            guard let self else { return }
+            guard !Task.isCancelled,
+                  formatGeneration == generation,
+                  documentStore.document.id == sourceDocument.id,
+                  documentStore.document.body == sourceDocument.body,
+                  settings.formatSettings.validated == sourceFormatSettings,
+                  FormatOptions(isPremiumUser: isPremiumUser) == sourceOptions else {
+                if formatGeneration == generation {
+                    isApplyingFormat = false
+                }
+                return
+            }
+
+            if formattedBody != sourceDocument.body {
+                documentStore.updateBody(formattedBody)
+            }
+            isApplyingFormat = false
+        }
+    }
+
+    nonisolated static func defaultFormatOperation(
+        text: String,
+        settings: FormatSettings,
+        options: FormatOptions
+    ) async -> String {
+        await Task.detached(priority: .userInitiated) {
+            ManuscriptFormatter.formatManuscriptText(
+                text,
+                settings: settings,
+                options: options
+            )
+        }.value
     }
 }

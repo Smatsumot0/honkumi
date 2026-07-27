@@ -430,6 +430,15 @@ struct SettingsView: View {
                 Text("オンにした場合、本文入力時に自動でフォーマットされます。オフの場合、プレビュー・PDF出力時も本文を変更せずに表示します。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+
+                if viewModel.isApplyingFormat {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("本文にフォーマットを適用中…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section("無料で使える項目") {
