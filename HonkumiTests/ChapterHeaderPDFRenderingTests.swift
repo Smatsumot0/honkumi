@@ -3,8 +3,8 @@ import PDFKit
 import XCTest
 
 final class ChapterHeaderPDFRenderingTests: XCTestCase {
-    func testNormalAndSpreadPreviewRenderSameFragmentsOnOnePhysicalSpread() async throws {
-        let document = makeSpreadDocument()
+    func testNormalAndSpreadPreviewRenderFullTitleOnEveryEligiblePage() async throws {
+        let document = makeFittingTitleDocument()
         let pagination = ManuscriptRenderPipeline.paginationResult(
             for: document,
             subscriptionStatus: .free
@@ -14,19 +14,19 @@ final class ChapterHeaderPDFRenderingTests: XCTestCase {
             settings: pagination.document.settings,
             subscriptionStatus: .free
         )
-        let issue = try XCTUnwrap(plan.issues.first)
-        let title = issue.title
         let fragments = pagination.pages.enumerated().compactMap { index, page in
             plan.fragmentsByPageID[page.id].map { (index, $0) }
         }
-        XCTAssertEqual(fragments.count, 2)
-        let recombinedTitle =
-            (fragments.first { $0.1.alignment == .trailing }?.1.text ?? "")
-            + (fragments.first { $0.1.alignment == .leading }?.1.text ?? "")
-        XCTAssertEqual(recombinedTitle, title)
+
+        XCTAssertGreaterThanOrEqual(fragments.count, 2)
+        XCTAssertTrue(plan.issues.isEmpty)
+        XCTAssertTrue(fragments.allSatisfy { $0.1.text == "短い章タイトル" })
 
         let exporter = PDFExportService()
-        let normalURL = try await exporter.export(document: document, subscriptionStatus: .free)
+        let normalURL = try await exporter.export(
+            document: document,
+            subscriptionStatus: .free
+        )
         let spreadURL = try await exporter.exportPreviewPDF(
             document: document,
             subscriptionStatus: .free,
@@ -42,19 +42,16 @@ final class ChapterHeaderPDFRenderingTests: XCTestCase {
         for (pageIndex, fragment) in fragments {
             let pageText = try XCTUnwrap(normalPDF.page(at: pageIndex)?.string)
             XCTAssertTrue(pageText.contains(fragment.text))
-            XCTAssertFalse(pageText.contains(title))
         }
 
         let spreadPDF = try XCTUnwrap(PDFDocument(url: spreadURL))
         let spreadText = (0..<spreadPDF.pageCount)
             .compactMap { spreadPDF.page(at: $0)?.string }
             .joined()
-        for (_, fragment) in fragments {
-            XCTAssertTrue(spreadText.contains(fragment.text))
-        }
+        XCTAssertTrue(spreadText.contains("短い章タイトル"))
     }
 
-    private func makeSpreadDocument() -> ManuscriptDocument {
+    private func makeFittingTitleDocument() -> ManuscriptDocument {
         var settings = EditorSettings.default
         settings.showChapterTitle = true
         settings.showTableOfContents = false
@@ -65,19 +62,9 @@ final class ChapterHeaderPDFRenderingTests: XCTestCase {
         settings.linesPerPage = 10
         settings.pageNumberStart = 1
 
-        let layout = LayoutCalculator.layout(for: settings, pageNumber: 2)
-        let font = ChapterHeaderLayoutPlanner.font(for: layout, subscriptionStatus: .free)
-        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        var title = ""
-        var index = 0
-        while (title as NSString).size(withAttributes: [.font: font]).width <= layout.bodyFrame.width {
-            title.append(alphabet[index % alphabet.count])
-            index += 1
-        }
-
         return ManuscriptDocument(
             title: "Chapter Header Rendering",
-            body: "\(ManuscriptMarkupParser.chapterTag(for: title))\n"
+            body: "\(ManuscriptMarkupParser.chapterTag(for: "短い章タイトル"))\n"
                 + String(repeating: "本", count: 700),
             settings: settings
         )

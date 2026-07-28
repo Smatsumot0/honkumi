@@ -1,12 +1,6 @@
 import Foundation
 import UIKit
 
-nonisolated enum ChapterHeaderSplitResult: Equatable {
-    case single(String)
-    case spread(first: String, second: String)
-    case overflow
-}
-
 nonisolated enum ChapterHeaderHorizontalAlignment: Equatable {
     case leading
     case trailing
@@ -18,14 +12,8 @@ nonisolated struct ChapterHeaderFragment: Equatable {
     let alignment: ChapterHeaderHorizontalAlignment
 }
 
-nonisolated enum ChapterHeaderLayoutIssueKind: Equatable {
-    case spread
-    case overflow
-}
-
 nonisolated struct ChapterHeaderLayoutIssue: Equatable {
     let chapterIndex: Int
-    let kind: ChapterHeaderLayoutIssueKind
     let title: String
     let pageNumbers: [Int]
 }
@@ -44,36 +32,6 @@ nonisolated enum ChapterHeaderLayoutPlanner {
         let layout: PageLayout
         let title: String?
         let chapterIndex: Int?
-    }
-
-    static func split(
-        title: String,
-        firstAvailableWidth: CGFloat,
-        secondAvailableWidth: CGFloat?,
-        font: UIFont,
-        measureWidth: MeasureWidth = defaultMeasureWidth
-    ) -> ChapterHeaderSplitResult {
-        if measureWidth(title, font) <= firstAvailableWidth {
-            return .single(title)
-        }
-
-        guard let secondAvailableWidth else {
-            return .overflow
-        }
-
-        for splitIndex in title.indices.reversed() where splitIndex != title.startIndex {
-            let first = String(title[..<splitIndex])
-            guard measureWidth(first, font) <= firstAvailableWidth else {
-                continue
-            }
-
-            let second = String(title[splitIndex...])
-            if measureWidth(second, font) <= secondAvailableWidth {
-                return .spread(first: first, second: second)
-            }
-        }
-
-        return .overflow
     }
 
     static func makePlan(
@@ -118,91 +76,26 @@ nonisolated enum ChapterHeaderLayoutPlanner {
                 chapterIndex: title == nil ? nil : activeChapterIndex
             )
         }
-        let candidatesByPageNumber = Dictionary(
-            uniqueKeysWithValues: candidates.map { ($0.physicalPageNumber, $0) }
-        )
-        let spreadLeftPageNumbers = Set(candidates.map {
-            spreadLeftPageNumber(containing: $0.physicalPageNumber)
-        }).sorted()
 
         var fragments: [UUID: ChapterHeaderFragment] = [:]
         var issuesByChapter: [Int: ChapterHeaderLayoutIssue] = [:]
 
-        for leftPageNumber in spreadLeftPageNumbers {
-            let left = candidatesByPageNumber[leftPageNumber]
-            let right = candidatesByPageNumber[leftPageNumber - 1]
-            let pageNumbers = [left, right].compactMap(\.?.physicalPageNumber)
-
-            if let left,
-               let right,
-               let leftTitle = left.title,
-               leftTitle == right.title,
-               let chapterIndex = left.chapterIndex,
-               chapterIndex == right.chapterIndex {
-                let font = font(for: left.layout, subscriptionStatus: subscriptionStatus)
-                switch split(
-                    title: leftTitle,
-                    firstAvailableWidth: left.layout.bodyFrame.width,
-                    secondAvailableWidth: right.layout.bodyFrame.width,
-                    font: font,
-                    measureWidth: measureWidth
-                ) {
-                case .single:
-                    fragments[left.page.id] = singleFragment(for: left, title: leftTitle)
-                    fragments[right.page.id] = singleFragment(for: right, title: leftTitle)
-                case let .spread(first, second):
-                    fragments[left.page.id] = ChapterHeaderFragment(
-                        pageID: left.page.id,
-                        text: first,
-                        alignment: .trailing
-                    )
-                    fragments[right.page.id] = ChapterHeaderFragment(
-                        pageID: right.page.id,
-                        text: second,
-                        alignment: .leading
-                    )
-                    record(
-                        ChapterHeaderLayoutIssue(
-                            chapterIndex: chapterIndex,
-                            kind: .spread,
-                            title: leftTitle,
-                            pageNumbers: pageNumbers
-                        ),
-                        in: &issuesByChapter
-                    )
-                case .overflow:
-                    record(
-                        ChapterHeaderLayoutIssue(
-                            chapterIndex: chapterIndex,
-                            kind: .overflow,
-                            title: leftTitle,
-                            pageNumbers: pageNumbers
-                        ),
-                        in: &issuesByChapter
-                    )
-                }
+        for candidate in candidates {
+            guard let title = candidate.title,
+                  let chapterIndex = candidate.chapterIndex else {
                 continue
             }
 
-            for candidate in [left, right].compactMap({ $0 }) {
-                guard let title = candidate.title,
-                      let chapterIndex = candidate.chapterIndex else {
-                    continue
-                }
-                let font = font(for: candidate.layout, subscriptionStatus: subscriptionStatus)
-                if measureWidth(title, font) <= candidate.layout.bodyFrame.width {
-                    fragments[candidate.page.id] = singleFragment(for: candidate, title: title)
-                } else {
-                    record(
-                        ChapterHeaderLayoutIssue(
-                            chapterIndex: chapterIndex,
-                            kind: .overflow,
-                            title: title,
-                            pageNumbers: pageNumbers
-                        ),
-                        in: &issuesByChapter
-                    )
-                }
+            let font = font(for: candidate.layout, subscriptionStatus: subscriptionStatus)
+            if measureWidth(title, font) <= candidate.layout.bodyFrame.width {
+                fragments[candidate.page.id] = singleFragment(for: candidate, title: title)
+            } else {
+                recordOverflow(
+                    chapterIndex: chapterIndex,
+                    title: title,
+                    pageNumber: candidate.physicalPageNumber,
+                    in: &issuesByChapter
+                )
             }
         }
 
@@ -245,24 +138,21 @@ nonisolated enum ChapterHeaderLayoutPlanner {
         return normalized.isEmpty ? nil : normalized
     }
 
-    private static func record(
-        _ issue: ChapterHeaderLayoutIssue,
+    private static func recordOverflow(
+        chapterIndex: Int,
+        title: String,
+        pageNumber: Int,
         in issuesByChapter: inout [Int: ChapterHeaderLayoutIssue]
     ) {
-        guard let existing = issuesByChapter[issue.chapterIndex] else {
-            issuesByChapter[issue.chapterIndex] = issue
-            return
-        }
-        guard existing.kind != .overflow, issue.kind == .overflow else {
-            return
-        }
-        issuesByChapter[issue.chapterIndex] = issue
-    }
-
-    private static func spreadLeftPageNumber(containing physicalPageNumber: Int) -> Int {
-        physicalPageNumber.isMultiple(of: 2)
-            ? physicalPageNumber + 1
-            : physicalPageNumber
+        let existingPages = issuesByChapter[chapterIndex]?.pageNumbers ?? []
+        let pageNumbers = existingPages.contains(pageNumber)
+            ? existingPages
+            : existingPages + [pageNumber]
+        issuesByChapter[chapterIndex] = ChapterHeaderLayoutIssue(
+            chapterIndex: chapterIndex,
+            title: title,
+            pageNumbers: pageNumbers
+        )
     }
 
     private static func singleFragment(

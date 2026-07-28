@@ -489,32 +489,17 @@ nonisolated struct PDFPreflightService {
 
         for issue in plan.issues {
             let pageNumbersText = issue.pageNumbers.map(String.init).joined(separator: "・")
-            switch issue.kind {
-            case .spread:
-                issues.append(warning(
-                    id: "pdf.chapterHeader.spread.chapter.\(issue.chapterIndex)",
-                    title: "章タイトルが見開きにまたがります",
-                    message: "「\(issue.title)」を見開き \(pageNumbersText) ページに分けて表示します。",
-                    location: .init(
-                        type: .page,
-                        pageNumber: issue.pageNumbers.first,
-                        characterRange: nil,
-                        settingKey: "showChapterTitle"
-                    )
-                ))
-            case .overflow:
-                issues.append(error(
-                    id: "pdf.chapterHeader.overflow.chapter.\(issue.chapterIndex)",
-                    title: "章タイトルが見開きに収まりません",
-                    message: "「\(issue.title)」は見開き \(pageNumbersText) ページの上部に収まりません。章タイトルを短くしてください。",
-                    location: .init(
-                        type: .page,
-                        pageNumber: issue.pageNumbers.first,
-                        characterRange: nil,
-                        settingKey: "showChapterTitle"
-                    )
-                ))
-            }
+            issues.append(error(
+                id: "pdf.chapterHeader.overflow.chapter.\(issue.chapterIndex)",
+                title: "章タイトルがページ内に収まりません",
+                message: "「\(issue.title)」は \(pageNumbersText) ページの上部に収まりません。章タイトルを短くしてください。",
+                location: .init(
+                    type: .page,
+                    pageNumber: issue.pageNumbers.first,
+                    characterRange: nil,
+                    settingKey: "showChapterTitle"
+                )
+            ))
         }
     }
 
