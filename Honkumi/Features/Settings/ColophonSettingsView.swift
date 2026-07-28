@@ -14,7 +14,7 @@ struct ColophonSettingsView: View {
     @ObservedObject var proStore: HonkumiProStore
 
     @State private var selectedCircleImageItem: PhotosPickerItem?
-    @State private var isCircleImageFileImporterPresented = false
+    @State private var circleLogoImportPresentation = CircleLogoImportPresentation()
     @State private var circleImageImportErrorMessage: String?
     @State private var isProPurchasePresented = false
     @State private var presentedProFeature: HonkumiProFeature?
@@ -32,8 +32,25 @@ struct ColophonSettingsView: View {
         .onChange(of: selectedCircleImageItem) { _, item in
             loadImageData(from: item)
         }
+        .confirmationDialog(
+            "サークルロゴの選択方法",
+            isPresented: circleLogoPresentationBinding(for: .sourceChooser)
+        ) {
+            Button("写真から選択") {
+                circleLogoImportPresentation.present(.photoLibrary)
+            }
+            Button("ファイルから選択") {
+                circleLogoImportPresentation.present(.fileImporter)
+            }
+            Button("キャンセル", role: .cancel) {}
+        }
+        .photosPicker(
+            isPresented: circleLogoPresentationBinding(for: .photoLibrary),
+            selection: $selectedCircleImageItem,
+            matching: .images
+        )
         .fileImporter(
-            isPresented: $isCircleImageFileImporterPresented,
+            isPresented: circleLogoPresentationBinding(for: .fileImporter),
             allowedContentTypes: [.image],
             allowsMultipleSelection: false,
             onCompletion: handleCircleImageFileImport
@@ -154,15 +171,12 @@ struct ColophonSettingsView: View {
                 imagePreview(data: imageData)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    PhotosPicker(selection: $selectedCircleImageItem, matching: .images) {
-                        Label("写真から選択", systemImage: "photo.badge.plus")
-                    }
-
                     Button {
-                        isCircleImageFileImporterPresented = true
+                        circleLogoImportPresentation.present(.sourceChooser)
                     } label: {
-                        Label("ファイルから選択", systemImage: "folder")
+                        Label("サークルロゴを選択", systemImage: "photo.on.rectangle")
                     }
+                    .accessibilityIdentifier("colophon.circleLogo.select")
                 }
 
                 Spacer()
@@ -233,6 +247,21 @@ struct ColophonSettingsView: View {
             set: { newValue in
                 viewModel.updateColophon { colophon in
                     colophon.publicationDate = newValue
+                }
+            }
+        )
+    }
+
+    private func circleLogoPresentationBinding(
+        for destination: CircleLogoImportPresentation.Destination
+    ) -> Binding<Bool> {
+        Binding(
+            get: { circleLogoImportPresentation.isPresented(destination) },
+            set: { isPresented in
+                if isPresented {
+                    circleLogoImportPresentation.present(destination)
+                } else {
+                    circleLogoImportPresentation.dismiss(destination)
                 }
             }
         )
