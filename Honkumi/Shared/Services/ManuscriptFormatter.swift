@@ -44,8 +44,8 @@ nonisolated enum ManuscriptFormatter {
         ),
         FormatRule(
             id: \.enableNormalizeDash,
-            label: "ダッシュの保持",
-            description: "─、━、―、ー を相互変換せず、それぞれの文字として保持します。",
+            label: "連続ダッシュの統一",
+            description: "─、━、―、ー が2文字以上続く箇所を ―― に整えます。",
             premium: true
         ),
         FormatRule(
@@ -57,7 +57,7 @@ nonisolated enum ManuscriptFormatter {
         FormatRule(
             id: \.enableNormalizePunctuation,
             label: "句読点の統一",
-            description: "半角の , と . を 、 と 。 に変換します。",
+            description: "半角・全角のコンマを 、 に、半角ピリオドを 。 に変換します。",
             premium: true
         ),
         FormatRule(
@@ -234,7 +234,11 @@ nonisolated enum ManuscriptFormatter {
     }
 
     private static func normalizeDash(_ text: String) -> String {
-        text
+        text.replacingOccurrences(
+            of: #"[─━―ー]{2,}"#,
+            with: "――",
+            options: .regularExpression
+        )
     }
 
     private static func normalizeSpaceAfterExclamationQuestion(_ text: String) -> String {
@@ -266,6 +270,8 @@ nonisolated enum ManuscriptFormatter {
     private static func normalizePunctuation(_ text: String) -> String {
         text
             .replacingOccurrences(of: ",", with: "、")
+            .replacingOccurrences(of: "､", with: "、")
+            .replacingOccurrences(of: "，", with: "、")
             .replacingOccurrences(of: ".", with: "。")
     }
 
