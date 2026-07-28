@@ -20,6 +20,7 @@ final class SettingsViewModel: ObservableObject {
 
     @Published private(set) var document: ManuscriptDocument
     @Published private(set) var userDefaultSettings: EditorSettings
+    @Published private(set) var subscriptionStatus: SubscriptionStatus
     @Published private(set) var isApplyingFormat = false
     @Published private(set) var isCalculatingPrintSettings = false
     @Published private var printSettingsSnapshot: PrintSettingsDisplaySnapshot
@@ -63,6 +64,7 @@ final class SettingsViewModel: ObservableObject {
         self.printSnapshotOperation = printSnapshotOperation
         self.document = initialDocument
         self.userDefaultSettings = initialUserDefaultSettings
+        self.subscriptionStatus = documentStore.subscriptionStatus
         self.printSettingsSnapshot = .initial(settings: initialSettings)
         self.printSnapshotSource = initialPrintSource
 
@@ -83,6 +85,23 @@ final class SettingsViewModel: ObservableObject {
                 guard let self else { return }
                 self.userDefaultSettings = settings
                 self.schedulePrintSnapshotRefresh()
+            }
+            .store(in: &cancellables)
+
+        documentStore.$appData
+            .map(\.subscriptionStatus)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] status in
+                guard let self else { return }
+                let wasPremiumUser = isPremiumUser
+                subscriptionStatus = status
+
+                if !isPremiumUser {
+                    invalidateFormatApplication()
+                } else if !wasPremiumUser, shouldApplyEnabledPremiumFormatting {
+                    scheduleFormatApplication(using: settings)
+                }
             }
             .store(in: &cancellables)
 
@@ -113,20 +132,16 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
-    var subscriptionStatus: SubscriptionStatus {
-        documentStore.subscriptionStatus
-    }
-
     var isPremiumUser: Bool {
         subscriptionStatus == .paid
     }
 
     var isAdditionalFontPackUnlocked: Bool {
-        documentStore.isAdditionalFontPackUnlocked
+        isPremiumUser
     }
 
     var isPageNumberFontUnlocked: Bool {
-        documentStore.isPageNumberFontUnlocked
+        isPremiumUser
     }
 
     var isActiveWorkScope: Bool {
@@ -417,16 +432,27 @@ final class SettingsViewModel: ObservableObject {
     ) {
         guard scope == .activeWork else { return }
         guard previousSettings.formatSettings != updatedSettings.formatSettings else { return }
+        scheduleFormatApplication(using: updatedSettings)
+    }
 
-        formatTask?.cancel()
-        formatGeneration += 1
-        let generation = formatGeneration
+    private var shouldApplyEnabledPremiumFormatting: Bool {
+        guard scope == .activeWork,
+              settings.formatSettings.enableAutoFormat else {
+            return false
+        }
+        return ManuscriptFormatter.premiumRules.contains { rule in
+            settings.formatSettings[keyPath: rule.id]
+        }
+    }
 
+    private func scheduleFormatApplication(using updatedSettings: EditorSettings) {
+        guard scope == .activeWork else { return }
+        invalidateFormatApplication()
         guard updatedSettings.formatSettings.enableAutoFormat else {
-            isApplyingFormat = false
             return
         }
 
+        let generation = formatGeneration
         let sourceDocument = documentStore.document
         let sourceFormatSettings = updatedSettings.validated.formatSettings
         let sourceOptions = FormatOptions(isPremiumUser: isPremiumUser)
@@ -457,6 +483,13 @@ final class SettingsViewModel: ObservableObject {
             }
             isApplyingFormat = false
         }
+    }
+
+    private func invalidateFormatApplication() {
+        formatTask?.cancel()
+        formatTask = nil
+        formatGeneration += 1
+        isApplyingFormat = false
     }
 
     private func schedulePrintSnapshotRefresh() {

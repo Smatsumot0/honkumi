@@ -1,8 +1,31 @@
 @testable import Honkumi
+import Combine
 import XCTest
 
 @MainActor
 final class SettingsFormatApplicationTests: XCTestCase {
+    func testUnlockingProPublishesStatusAndFormatsExistingBody() async throws {
+        var document = ManuscriptDocument(title: "Formatting", body: "A,B.")
+        document.settings.formatSettings.enableAutoFormat = true
+        document.settings.formatSettings.enableNormalizePunctuation = true
+        let store = makeStore(document: document, subscriptionStatus: .free)
+        let viewModel = SettingsViewModel(documentStore: store)
+        var publishedStatuses: [SubscriptionStatus] = []
+        let cancellable = viewModel.$subscriptionStatus
+            .dropFirst()
+            .sink { publishedStatuses.append($0) }
+
+        store.setProUnlocked(true)
+
+        try await waitUntil {
+            viewModel.subscriptionStatus == .paid &&
+                viewModel.document.body == "A、B。"
+        }
+        XCTAssertEqual(publishedStatuses, [.paid])
+        XCTAssertFalse(viewModel.isApplyingFormat)
+        withExtendedLifetime(cancellable) {}
+    }
+
     func testEnablingPaidPunctuationRuleFormatsExistingBodyWhileAutoFormatIsOn() async throws {
         var document = ManuscriptDocument(title: "Formatting", body: "A,B.")
         document.settings.formatSettings.enableAutoFormat = true
@@ -50,6 +73,33 @@ final class SettingsFormatApplicationTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(30))
 
         XCTAssertEqual(viewModel.document.body, "latest")
+        XCTAssertFalse(viewModel.isApplyingFormat)
+    }
+
+    func testPaidFormatResultIsRejectedAfterProRelocks() async throws {
+        var document = ManuscriptDocument(title: "Formatting", body: "A,B.")
+        document.settings.formatSettings.enableAutoFormat = true
+        document.settings.formatSettings.enableNormalizePunctuation = false
+        let store = makeStore(document: document, subscriptionStatus: .paid)
+        let formatter = ControlledFormatter()
+        let viewModel = SettingsViewModel(
+            documentStore: store,
+            formatOperation: { text, _, _ in
+                await formatter.format(text)
+            }
+        )
+
+        viewModel.updateFormatRule(\.enableNormalizePunctuation, isEnabled: true)
+        try await waitUntil {
+            await formatter.requestCount == 1
+        }
+
+        store.setProUnlocked(false)
+        await formatter.resolveRequest(at: 0, with: "stale paid result")
+        try await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(viewModel.subscriptionStatus, .free)
+        XCTAssertEqual(viewModel.document.body, "A,B.")
         XCTAssertFalse(viewModel.isApplyingFormat)
     }
 
