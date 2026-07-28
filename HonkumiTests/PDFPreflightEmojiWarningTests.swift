@@ -2,7 +2,7 @@
 import XCTest
 
 final class PDFPreflightEmojiWarningTests: XCTestCase {
-    func testEmojiAndHeartsProduceOneWarningWithCountsAndReplacements() throws {
+    func testEmojiAndHeartsProduceSeparateWarningsWithCountsAndReplacements() throws {
         var settings = EditorSettings.default
         settings.colophon.isEnabled = false
         let document = ManuscriptDocument(
@@ -15,20 +15,54 @@ final class PDFPreflightEmojiWarningTests: XCTestCase {
             document: document,
             subscriptionStatus: .free
         )
-        let issues = result.issues.filter {
-            $0.id == "print.textNormalization.emoji"
-        }
+        let heartIssue = try XCTUnwrap(result.issues.first {
+            $0.id == "print.textNormalization.heart"
+        })
+        let emojiIssue = try XCTUnwrap(result.issues.first {
+            $0.id == "print.textNormalization.unsupportedEmoji"
+        })
 
-        let issue = try XCTUnwrap(issues.first)
-        XCTAssertEqual(issues.count, 1)
-        XCTAssertEqual(issue.severity, .warning)
-        XCTAssertTrue(issue.message.contains("合計3件"))
-        XCTAssertTrue(issue.message.contains("2件を□"))
-        XCTAssertTrue(issue.message.contains("1件を♡"))
+        XCTAssertEqual(normalizationIssues(in: result).count, 2)
+        XCTAssertEqual(heartIssue.severity, .warning)
+        XCTAssertTrue(heartIssue.message.contains("1件"))
+        XCTAssertTrue(heartIssue.message.contains("♡"))
+        XCTAssertEqual(emojiIssue.severity, .warning)
+        XCTAssertTrue(emojiIssue.message.contains("2件"))
+        XCTAssertTrue(emojiIssue.message.contains("□"))
         XCTAssertTrue(result.canContinue)
     }
 
-    func testNoEmojiAddsNoReplacementWarning() {
+    func testHeartOnlyProducesOneHeartWarning() throws {
+        let document = ManuscriptDocument(title: "題♡", body: "本文❤️")
+
+        let result = PDFPreflightService().check(
+            document: document,
+            subscriptionStatus: .free
+        )
+        let issue = try XCTUnwrap(normalizationIssues(in: result).first)
+
+        XCTAssertEqual(normalizationIssues(in: result).count, 1)
+        XCTAssertEqual(issue.id, "print.textNormalization.heart")
+        XCTAssertTrue(issue.message.contains("1件"))
+        XCTAssertTrue(issue.message.contains("♡"))
+    }
+
+    func testUnsupportedEmojiOnlyProducesOneEmojiWarning() throws {
+        let document = ManuscriptDocument(title: "題😀", body: "本文💡")
+
+        let result = PDFPreflightService().check(
+            document: document,
+            subscriptionStatus: .free
+        )
+        let issue = try XCTUnwrap(normalizationIssues(in: result).first)
+
+        XCTAssertEqual(normalizationIssues(in: result).count, 1)
+        XCTAssertEqual(issue.id, "print.textNormalization.unsupportedEmoji")
+        XCTAssertTrue(issue.message.contains("2件"))
+        XCTAssertTrue(issue.message.contains("□"))
+    }
+
+    func testNoEmojiAddsNoReplacementWarnings() {
         let document = ManuscriptDocument(title: "題", body: "本文")
 
         let result = PDFPreflightService().check(
@@ -36,9 +70,7 @@ final class PDFPreflightEmojiWarningTests: XCTestCase {
             subscriptionStatus: .free
         )
 
-        XCTAssertFalse(result.issues.contains {
-            $0.id == "print.textNormalization.emoji"
-        })
+        XCTAssertTrue(normalizationIssues(in: result).isEmpty)
     }
 
     func testHiddenColophonEmojiIsNotCounted() {
@@ -57,8 +89,13 @@ final class PDFPreflightEmojiWarningTests: XCTestCase {
             subscriptionStatus: .free
         )
 
-        XCTAssertFalse(result.issues.contains {
-            $0.id == "print.textNormalization.emoji"
-        })
+        XCTAssertTrue(normalizationIssues(in: result).isEmpty)
+    }
+
+    private func normalizationIssues(in result: PreflightResult) -> [PreflightIssue] {
+        result.issues.filter {
+            $0.id == "print.textNormalization.heart" ||
+                $0.id == "print.textNormalization.unsupportedEmoji"
+        }
     }
 }
