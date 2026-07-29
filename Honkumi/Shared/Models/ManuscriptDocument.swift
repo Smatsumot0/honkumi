@@ -8,6 +8,7 @@ nonisolated struct ManuscriptDocument: Codable, Equatable, Identifiable {
     var settings: EditorSettings
     var createdAt: Date
     var updatedAt: Date
+    var reviewedUserDefaultSettingsRevision: Int
 
     init(
         id: UUID = UUID(),
@@ -16,7 +17,8 @@ nonisolated struct ManuscriptDocument: Codable, Equatable, Identifiable {
         body: String = ManuscriptDocument.sampleBody,
         settings: EditorSettings = .default,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        reviewedUserDefaultSettingsRevision: Int = 0
     ) {
         self.id = id
         self.categoryId = categoryId
@@ -25,6 +27,8 @@ nonisolated struct ManuscriptDocument: Codable, Equatable, Identifiable {
         self.settings = settings
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.reviewedUserDefaultSettingsRevision =
+            reviewedUserDefaultSettingsRevision
     }
 }
 
@@ -45,6 +49,7 @@ nonisolated extension ManuscriptDocument {
         case settings
         case createdAt
         case updatedAt
+        case reviewedUserDefaultSettingsRevision
     }
 
     init(from decoder: Decoder) throws {
@@ -56,7 +61,11 @@ nonisolated extension ManuscriptDocument {
             body: try container.decodeIfPresent(String.self, forKey: .body) ?? "",
             settings: try container.decodeIfPresent(EditorSettings.self, forKey: .settings) ?? .default,
             createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
-            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(),
+            reviewedUserDefaultSettingsRevision: try container.decodeIfPresent(
+                Int.self,
+                forKey: .reviewedUserDefaultSettingsRevision
+            ) ?? 0
         )
     }
 }

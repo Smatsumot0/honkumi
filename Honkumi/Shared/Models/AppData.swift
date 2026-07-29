@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated struct AppData: Codable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     var version: Int
     var categories: [WorkCategory]
@@ -9,6 +9,7 @@ nonisolated struct AppData: Codable, Equatable {
     var userDefaultSettings: EditorSettings
     var activeWorkId: UUID?
     var subscriptionStatus: SubscriptionStatus
+    var userDefaultSettingsRevision: Int = 0
 
     static var emptyLibrary: AppData {
         AppData(
@@ -51,6 +52,7 @@ nonisolated extension AppData {
         case userDefaultSettings
         case activeWorkId
         case subscriptionStatus
+        case userDefaultSettingsRevision
     }
 
     init(from decoder: Decoder) throws {
@@ -61,7 +63,11 @@ nonisolated extension AppData {
             works: try container.decodeIfPresent([ManuscriptDocument].self, forKey: .works) ?? [],
             userDefaultSettings: try container.decodeIfPresent(EditorSettings.self, forKey: .userDefaultSettings) ?? .default,
             activeWorkId: try container.decodeIfPresent(UUID.self, forKey: .activeWorkId),
-            subscriptionStatus: try container.decodeIfPresent(SubscriptionStatus.self, forKey: .subscriptionStatus) ?? .free
+            subscriptionStatus: try container.decodeIfPresent(SubscriptionStatus.self, forKey: .subscriptionStatus) ?? .free,
+            userDefaultSettingsRevision: try container.decodeIfPresent(
+                Int.self,
+                forKey: .userDefaultSettingsRevision
+            ) ?? 0
         )
     }
 }
