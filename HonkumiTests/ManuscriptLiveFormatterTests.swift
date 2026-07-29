@@ -141,4 +141,24 @@ final class ManuscriptLiveFormatterTests: XCTestCase {
 
         XCTAssertEqual(result.text, "A,B.")
     }
+
+    func testDeletionRangeFallsBackToTheDeletionPoint() {
+        XCTAssertEqual(
+            ManuscriptLiveFormatter.postEditChangedRange(
+                replacing: NSRange(location: 4, length: 3),
+                with: ""
+            ),
+            NSRange(location: 4, length: 0)
+        )
+    }
+
+    func testPasteRangeUsesReplacementUTF16Length() {
+        XCTAssertEqual(
+            ManuscriptLiveFormatter.postEditChangedRange(
+                replacing: NSRange(location: 2, length: 1),
+                with: "追記😀"
+            ),
+            NSRange(location: 2, length: 4)
+        )
+    }
 }

@@ -114,12 +114,8 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             return
         }
 
-        if !textView.isFirstResponder, textView.text != text {
-            let preservedOffset = textView.contentOffset
-            textView.text = text
-            context.coordinator.needsFullStyleRefresh = true
-            applyEditorStyle(to: textView, coordinator: context.coordinator)
-            textView.setContentOffset(preservedOffset, animated: false)
+        if textView.text != text {
+            context.coordinator.applyExternalText(text, to: textView)
         }
     }
 
@@ -186,6 +182,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         var parent: ManuscriptTextEditor
         private var isApplyingSelection = false
         private var isApplyingTextChange = false
+        private var pendingChangedRange: NSRange?
         private weak var observedTextView: UITextView?
         private var keyboardTransitionOffset: CGPoint?
         private var keyboardTransitionWorkItem: DispatchWorkItem?
@@ -288,10 +285,29 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             }
         }
 
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText text: String
+        ) -> Bool {
+            pendingChangedRange = ManuscriptLiveFormatter.postEditChangedRange(
+                replacing: range,
+                with: text
+            )
+            return true
+        }
+
         func textViewDidChange(_ textView: UITextView) {
             guard !isApplyingTextChange else { return }
             guard textView.markedTextRange == nil else { return }
-            commitTextChange(from: textView)
+
+            let fallback = NSRange(
+                location: textView.selectedRange.location,
+                length: 0
+            )
+            let changedRange = pendingChangedRange ?? fallback
+            pendingChangedRange = nil
+            applyLiveFormatAndCommit(changedRange: changedRange, in: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -312,7 +328,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             parent.isEditing = false
             saveContentOffset(from: textView)
             guard textView.markedTextRange == nil else { return }
-            applyFormatIfNeeded(to: textView)
+            commitTextChange(from: textView)
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -490,6 +506,79 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             }
         }
 
+        func applyExternalText(
+            _ text: String,
+            to textView: UITextView
+        ) {
+            guard textView.markedTextRange == nil,
+                  textView.text != text else { return }
+
+            let preservedOffset = textView.contentOffset
+            let safeSelection = parent.clampedRange(
+                textView.selectedRange,
+                in: text
+            )
+
+            pendingChangedRange = nil
+            isApplyingTextChange = true
+            textView.text = text
+            needsFullStyleRefresh = true
+            parent.applyEditorStyle(to: textView, coordinator: self)
+            textView.selectedRange = safeSelection
+            textView.setContentOffset(
+                clampedContentOffset(preservedOffset, in: textView),
+                animated: false
+            )
+            isApplyingTextChange = false
+
+            parent.selectedRange = safeSelection
+            saveContentOffset(from: textView)
+        }
+
+        private func applyLiveFormatAndCommit(
+            changedRange: NSRange,
+            in textView: UITextView
+        ) {
+            let originalText = textView.text ?? ""
+            let originalSelection = textView.selectedRange
+            let originalOffset = textView.contentOffset
+            let result = ManuscriptLiveFormatter.format(
+                originalText,
+                changedRange: changedRange,
+                selectedRange: originalSelection,
+                settings: parent.formatSettings,
+                options: parent.formatOptions
+            )
+
+            if result.text != originalText {
+                let replacement = NSAttributedString(
+                    string: result.replacementText,
+                    attributes: textView.typingAttributes
+                )
+                isApplyingTextChange = true
+                textView.textStorage.beginEditing()
+                textView.textStorage.replaceCharacters(
+                    in: result.replacementRange,
+                    with: replacement
+                )
+                textView.textStorage.endEditing()
+                textView.selectedRange = result.selectedRange
+                textView.setContentOffset(originalOffset, animated: false)
+                isApplyingTextChange = false
+            }
+
+            parent.text = result.text
+            parent.selectedRange = result.selectedRange
+            if !isSelectionVisible(result.selectedRange, in: textView, verticalMargin: 20) {
+                allowingAutomaticSelectionScrolling(in: textView) {
+                    revealSelectionIfNeeded(result.selectedRange, in: textView, savesOffset: true)
+                }
+            } else {
+                textView.setContentOffset(originalOffset, animated: false)
+                saveContentOffset(from: textView)
+            }
+        }
+
         private func insert(
             _ text: String,
             cursorOffsetFromEnd: Int,
@@ -524,50 +613,27 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             _ result: ManuscriptTextInsertionResult,
             in textView: UITextView
         ) {
-            isApplyingTextChange = true
-            textView.text = result.text
-            textView.selectedRange = result.selectedRange
-            needsFullStyleRefresh = true
-            isApplyingTextChange = false
-
-            parent.text = result.text
-            parent.selectedRange = result.selectedRange
-            allowingAutomaticSelectionScrolling(in: textView) {
-                revealSelectionIfNeeded(result.selectedRange, in: textView, savesOffset: true)
-            }
-            saveContentOffset(from: textView)
-        }
-
-        private func applyFormatIfNeeded(to textView: UITextView) {
-            let originalText = textView.text ?? ""
-            let originalSelection = textView.selectedRange
             let originalOffset = textView.contentOffset
-            guard parent.formatSettings.validated.enableAutoFormat else {
-                commitTextChange(from: textView)
-                return
-            }
-            let formattedText = ManuscriptFormatter.formatManuscriptText(
-                originalText,
-                settings: parent.formatSettings,
-                options: parent.formatOptions
+            let replacement = NSAttributedString(
+                string: result.replacementText,
+                attributes: textView.typingAttributes
             )
 
-            if formattedText != originalText {
-                let adjustedSelection = adjustedRange(
-                    originalSelection,
-                    from: originalText,
-                    to: formattedText
-                )
-                isApplyingTextChange = true
-                textView.text = formattedText
-                textView.selectedRange = adjustedSelection
-                textView.setContentOffset(originalOffset, animated: false)
-                isApplyingTextChange = false
-                parent.text = formattedText
-                parent.selectedRange = adjustedSelection
-            } else {
-                commitTextChange(from: textView)
-            }
+            isApplyingTextChange = true
+            textView.textStorage.beginEditing()
+            textView.textStorage.replaceCharacters(
+                in: result.replacedRange,
+                with: replacement
+            )
+            textView.textStorage.endEditing()
+            textView.selectedRange = result.selectedRange
+            isApplyingTextChange = false
+            textView.setContentOffset(originalOffset, animated: false)
+
+            applyLiveFormatAndCommit(
+                changedRange: result.changedRange,
+                in: textView
+            )
         }
 
         @objc private func keyboardWillChangeFrame(_ notification: Notification) {
@@ -676,74 +742,5 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             )
         }
 
-        private func adjustedRange(_ range: NSRange, from originalText: String, to formattedText: String) -> NSRange {
-            let newLocation = adjustedLocation(range.location, from: originalText, to: formattedText)
-            let originalEnd = range.location + range.length
-            let adjustedEnd = adjustedLocation(originalEnd, from: originalText, to: formattedText)
-            let formattedLength = (formattedText as NSString).length
-            let safeLocation = min(max(newLocation, 0), formattedLength)
-            let safeEnd = min(max(adjustedEnd, safeLocation), formattedLength)
-            return NSRange(location: safeLocation, length: safeEnd - safeLocation)
-        }
-
-        private func adjustedLocation(_ location: Int, from originalText: String, to formattedText: String) -> Int {
-            let original = originalText as NSString
-            let formatted = formattedText as NSString
-            let originalLength = original.length
-            let formattedLength = formatted.length
-            let safeLocation = min(max(location, 0), originalLength)
-            let commonPrefixLength = commonPrefixLength(original: original, formatted: formatted)
-            let commonSuffixLength = commonSuffixLength(
-                original: original,
-                formatted: formatted,
-                commonPrefixLength: commonPrefixLength
-            )
-            let originalChangedEnd = originalLength - commonSuffixLength
-            let formattedChangedEnd = formattedLength - commonSuffixLength
-
-            if safeLocation <= commonPrefixLength {
-                return safeLocation
-            }
-
-            if safeLocation >= originalChangedEnd {
-                return safeLocation + (formattedChangedEnd - originalChangedEnd)
-            }
-
-            return formattedChangedEnd
-        }
-
-        private func commonPrefixLength(original: NSString, formatted: NSString) -> Int {
-            let maxLength = min(original.length, formatted.length)
-            var index = 0
-            while index < maxLength,
-                  original.substring(with: NSRange(location: index, length: 1)) == formatted.substring(with: NSRange(location: index, length: 1)) {
-                index += 1
-            }
-            return index
-        }
-
-        private func commonSuffixLength(
-            original: NSString,
-            formatted: NSString,
-            commonPrefixLength: Int
-        ) -> Int {
-            let originalLength = original.length
-            let formattedLength = formatted.length
-            var length = 0
-
-            while originalLength - length > commonPrefixLength,
-                  formattedLength - length > commonPrefixLength {
-                let originalCharacter = original.substring(
-                    with: NSRange(location: originalLength - length - 1, length: 1)
-                )
-                let formattedCharacter = formatted.substring(
-                    with: NSRange(location: formattedLength - length - 1, length: 1)
-                )
-                guard originalCharacter == formattedCharacter else { break }
-                length += 1
-            }
-
-            return length
-        }
     }
 }

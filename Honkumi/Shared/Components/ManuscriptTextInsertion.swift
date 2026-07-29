@@ -3,6 +3,9 @@ import Foundation
 nonisolated struct ManuscriptTextInsertionResult: Equatable {
     let text: String
     let selectedRange: NSRange
+    let replacedRange: NSRange
+    let replacementText: String
+    let changedRange: NSRange
 }
 
 nonisolated enum ManuscriptTextInsertion {
@@ -20,7 +23,10 @@ nonisolated enum ManuscriptTextInsertion {
 
         return ManuscriptTextInsertionResult(
             text: updatedText,
-            selectedRange: NSRange(location: cursorLocation, length: 0)
+            selectedRange: NSRange(location: cursorLocation, length: 0),
+            replacedRange: safeRange,
+            replacementText: insertedText,
+            changedRange: NSRange(location: safeRange.location, length: insertedLength)
         )
     }
 
@@ -46,7 +52,10 @@ nonisolated enum ManuscriptTextInsertion {
         )
         return ManuscriptTextInsertionResult(
             text: updatedText,
-            selectedRange: NSRange(location: safeRange.location + 2, length: 0)
+            selectedRange: NSRange(location: safeRange.location + 2, length: 0),
+            replacedRange: NSRange(location: lineRange.location, length: 0),
+            replacementText: "# ",
+            changedRange: NSRange(location: lineRange.location, length: 2)
         )
     }
 

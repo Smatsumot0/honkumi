@@ -44,4 +44,35 @@ final class ManuscriptTextInsertionTests: XCTestCase {
         XCTAssertEqual(result.text, "雨は上がった。\n# 駅へ続く道")
         XCTAssertEqual(result.selectedRange, NSRange(location: insertionPoint + 2, length: 0))
     }
+
+    func testInsertionReportsPostEditChangedRangeWithoutDiffingWholeText() {
+        let body = "前😀後"
+        let selection = NSRange(location: 3, length: 1)
+
+        let result = ManuscriptTextInsertion.applying(
+            "追記",
+            to: body,
+            replacing: selection
+        )
+
+        XCTAssertEqual(
+            result.changedRange,
+            NSRange(location: 3, length: 2)
+        )
+    }
+
+    func testChapterMarkerReportsItsActualLineStartInsertionRange() {
+        let body = "前の行\n章タイトル"
+        let insertionPoint = (body as NSString).length
+
+        let result = ManuscriptTextInsertion.applyingChapterTitleMarker(
+            to: body,
+            replacing: NSRange(location: insertionPoint, length: 0)
+        )
+
+        XCTAssertEqual(
+            result.changedRange,
+            NSRange(location: 4, length: 2)
+        )
+    }
 }

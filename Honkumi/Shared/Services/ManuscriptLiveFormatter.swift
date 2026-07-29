@@ -8,6 +8,16 @@ nonisolated struct ManuscriptLiveFormattingResult: Equatable {
 }
 
 nonisolated enum ManuscriptLiveFormatter {
+    static func postEditChangedRange(
+        replacing range: NSRange,
+        with replacementText: String
+    ) -> NSRange {
+        NSRange(
+            location: max(range.location, 0),
+            length: (replacementText as NSString).length
+        )
+    }
+
     static func format(
         _ text: String,
         changedRange: NSRange,
