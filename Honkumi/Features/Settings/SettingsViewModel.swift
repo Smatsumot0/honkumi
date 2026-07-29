@@ -3,11 +3,6 @@ import Foundation
 
 @MainActor
 final class SettingsViewModel: ObservableObject {
-    typealias FormatOperation = @Sendable (
-        _ text: String,
-        _ settings: FormatSettings,
-        _ options: FormatOptions
-    ) async -> String
     typealias PrintSnapshotOperation = @Sendable (
         _ body: String,
         _ settings: EditorSettings
@@ -21,17 +16,13 @@ final class SettingsViewModel: ObservableObject {
     @Published private(set) var document: ManuscriptDocument
     @Published private(set) var userDefaultSettings: EditorSettings
     @Published private(set) var subscriptionStatus: SubscriptionStatus
-    @Published private(set) var isApplyingFormat = false
     @Published private(set) var isCalculatingPrintSettings = false
     @Published private var printSettingsSnapshot: PrintSettingsDisplaySnapshot
 
     private let documentStore: DocumentStore
     private let scope: Scope
-    private let formatOperation: FormatOperation
     private let printSnapshotOperation: PrintSnapshotOperation
     private var cancellables = Set<AnyCancellable>()
-    private var formatTask: Task<Void, Never>?
-    private var formatGeneration = 0
     private var printSnapshotTask: Task<Void, Never>?
     private var printSnapshotGeneration = 0
     private var printSnapshotSource: PrintSnapshotSource
@@ -40,7 +31,6 @@ final class SettingsViewModel: ObservableObject {
     init(
         documentStore: DocumentStore,
         scope: Scope = .activeWork,
-        formatOperation: @escaping FormatOperation = SettingsViewModel.defaultFormatOperation,
         printSnapshotOperation: @escaping PrintSnapshotOperation =
             SettingsViewModel.defaultPrintSnapshotOperation
     ) {
@@ -60,7 +50,6 @@ final class SettingsViewModel: ObservableObject {
 
         self.documentStore = documentStore
         self.scope = scope
-        self.formatOperation = formatOperation
         self.printSnapshotOperation = printSnapshotOperation
         self.document = initialDocument
         self.userDefaultSettings = initialUserDefaultSettings
@@ -93,15 +82,7 @@ final class SettingsViewModel: ObservableObject {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] status in
-                guard let self else { return }
-                let wasPremiumUser = isPremiumUser
-                subscriptionStatus = status
-
-                if !isPremiumUser {
-                    invalidateFormatApplication()
-                } else if !wasPremiumUser, shouldApplyEnabledPremiumFormatting {
-                    scheduleFormatApplication(using: settings)
-                }
+                self?.subscriptionStatus = status
             }
             .store(in: &cancellables)
 
@@ -109,7 +90,6 @@ final class SettingsViewModel: ObservableObject {
     }
 
     deinit {
-        formatTask?.cancel()
         printSnapshotTask?.cancel()
     }
 
@@ -412,84 +392,15 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func updateFormatSettings(_ changes: (inout FormatSettings) -> Void) {
-        let previousSettings = settings
         var updated = settings
         changes(&updated.formatSettings)
         settings = updated
-
-        scheduleFormatApplication(previousSettings: previousSettings, updatedSettings: updated)
     }
 
     func updateFormatRule(_ keyPath: WritableKeyPath<FormatSettings, Bool>, isEnabled: Bool) {
         updateFormatSettings { formatSettings in
             formatSettings[keyPath: keyPath] = isEnabled
         }
-    }
-
-    private func scheduleFormatApplication(
-        previousSettings: EditorSettings,
-        updatedSettings: EditorSettings
-    ) {
-        guard scope == .activeWork else { return }
-        guard previousSettings.formatSettings != updatedSettings.formatSettings else { return }
-        scheduleFormatApplication(using: updatedSettings)
-    }
-
-    private var shouldApplyEnabledPremiumFormatting: Bool {
-        guard scope == .activeWork,
-              settings.formatSettings.enableAutoFormat else {
-            return false
-        }
-        return ManuscriptFormatter.premiumRules.contains { rule in
-            settings.formatSettings[keyPath: rule.id]
-        }
-    }
-
-    private func scheduleFormatApplication(using updatedSettings: EditorSettings) {
-        guard scope == .activeWork else { return }
-        invalidateFormatApplication()
-        guard updatedSettings.formatSettings.enableAutoFormat else {
-            return
-        }
-
-        let generation = formatGeneration
-        let sourceDocument = documentStore.document
-        let sourceFormatSettings = updatedSettings.validated.formatSettings
-        let sourceOptions = FormatOptions(isPremiumUser: isPremiumUser)
-        let operation = formatOperation
-        isApplyingFormat = true
-
-        formatTask = Task { [weak self] in
-            let formattedBody = await operation(
-                sourceDocument.body,
-                sourceFormatSettings,
-                sourceOptions
-            )
-            guard let self else { return }
-            guard !Task.isCancelled,
-                  formatGeneration == generation,
-                  documentStore.document.id == sourceDocument.id,
-                  documentStore.document.body == sourceDocument.body,
-                  settings.formatSettings.validated == sourceFormatSettings,
-                  FormatOptions(isPremiumUser: isPremiumUser) == sourceOptions else {
-                if formatGeneration == generation {
-                    isApplyingFormat = false
-                }
-                return
-            }
-
-            if formattedBody != sourceDocument.body {
-                documentStore.updateBody(formattedBody)
-            }
-            isApplyingFormat = false
-        }
-    }
-
-    private func invalidateFormatApplication() {
-        formatTask?.cancel()
-        formatTask = nil
-        formatGeneration += 1
-        isApplyingFormat = false
     }
 
     private func schedulePrintSnapshotRefresh() {
@@ -516,20 +427,6 @@ final class SettingsViewModel: ObservableObject {
             printSettingsSnapshot = snapshot
             isCalculatingPrintSettings = false
         }
-    }
-
-    nonisolated static func defaultFormatOperation(
-        text: String,
-        settings: FormatSettings,
-        options: FormatOptions
-    ) async -> String {
-        await Task.detached(priority: .userInitiated) {
-            ManuscriptFormatter.formatManuscriptText(
-                text,
-                settings: settings,
-                options: options
-            )
-        }.value
     }
 
     nonisolated static func defaultPrintSnapshotOperation(

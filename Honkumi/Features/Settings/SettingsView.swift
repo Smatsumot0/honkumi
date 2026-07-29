@@ -441,14 +441,6 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                if viewModel.isApplyingFormat {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("本文にフォーマットを適用中…")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
             }
 
             Section("無料で使える項目") {
