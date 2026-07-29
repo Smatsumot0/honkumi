@@ -94,6 +94,10 @@ final class DocumentStore: ObservableObject {
         appData.userDefaultSettings
     }
 
+    var userDefaultSettingsRevision: Int {
+        appData.userDefaultSettingsRevision
+    }
+
     var subscriptionStatus: SubscriptionStatus {
         appData.subscriptionStatus
     }
@@ -200,6 +204,20 @@ final class DocumentStore: ObservableObject {
         updateAppData { data in
             data.userDefaultSettings = settings.validated
         }
+    }
+
+    @discardableResult
+    func finishUserDefaultSettingsSession(
+        startingFrom initialSettings: EditorSettings
+    ) -> Bool {
+        guard initialSettings.validated !=
+                appData.userDefaultSettings.validated else {
+            return false
+        }
+        updateAppData { data in
+            data.userDefaultSettingsRevision += 1
+        }
+        return true
     }
 
     @discardableResult
@@ -314,6 +332,10 @@ final class DocumentStore: ObservableObject {
         var normalizedData = data
         normalizedData.version = AppData.currentVersion
         normalizedData.userDefaultSettings = normalizedData.userDefaultSettings.validated
+        normalizedData.userDefaultSettingsRevision = max(
+            normalizedData.userDefaultSettingsRevision,
+            0
+        )
 
         if !normalizedData.categories.contains(where: { $0.id == WorkCategory.uncategorizedId }) {
             normalizedData.categories.insert(.uncategorized, at: 0)
@@ -325,6 +347,12 @@ final class DocumentStore: ObservableObject {
                 normalizedData.works[index].categoryId = WorkCategory.uncategorizedId
             }
             normalizedData.works[index].settings = normalizedData.works[index].settings.validated
+            normalizedData.works[index].reviewedUserDefaultSettingsRevision =
+                max(
+                    normalizedData.works[index]
+                        .reviewedUserDefaultSettingsRevision,
+                    0
+                )
         }
 
         if normalizedData.works.isEmpty {
