@@ -132,6 +132,66 @@ final class DocumentStore: ObservableObject {
         }
     }
 
+    func userDefaultSettingsReviewRequest(
+        for workID: UUID
+    ) -> UserDefaultSettingsReviewRequest? {
+        guard let work = appData.works.first(where: { $0.id == workID }),
+              work.reviewedUserDefaultSettingsRevision <
+                appData.userDefaultSettingsRevision else {
+            return nil
+        }
+        return UserDefaultSettingsReviewRequest(
+            workID: workID,
+            revision: appData.userDefaultSettingsRevision
+        )
+    }
+
+    @discardableResult
+    func resolveUserDefaultSettingsReview(
+        _ request: UserDefaultSettingsReviewRequest,
+        decision: UserDefaultSettingsReviewDecision
+    ) -> WorkSelectionResult {
+        guard request.revision == appData.userDefaultSettingsRevision,
+              let work = appData.works.first(
+                where: { $0.id == request.workID }
+              ),
+              work.reviewedUserDefaultSettingsRevision <
+                request.revision else {
+            return .unchanged
+        }
+
+        var result = WorkSelectionResult.unchanged
+        updateAppData { data in
+            guard let index = data.works.firstIndex(
+                where: { $0.id == request.workID }
+            ) else {
+                return
+            }
+
+            switch decision {
+            case .apply:
+                data.works[index].settings =
+                    data.userDefaultSettings.validated
+                data.works[index].updatedAt = Date()
+                result = WorkSelectionResult(
+                    didSelect: true,
+                    shouldFormat: data.works[index]
+                        .settings.formatSettings.enableAutoFormat
+                )
+            case .keepCurrent:
+                result = WorkSelectionResult(
+                    didSelect: true,
+                    shouldFormat: false
+                )
+            }
+
+            data.works[index].reviewedUserDefaultSettingsRevision =
+                data.userDefaultSettingsRevision
+            data.activeWorkId = request.workID
+        }
+        return result
+    }
+
     @discardableResult
     func createWork(title: String = "", in categoryId: UUID? = nil) -> ManuscriptDocument {
         var createdWork = ManuscriptDocument()
