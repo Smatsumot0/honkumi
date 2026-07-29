@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var presentedSettingsInitialTab: SettingsInitialTab = .editor
     @State private var presentedColophonScope: SettingsViewModel.Scope?
     @State private var activeFormatSettingsSession: ManuscriptFormatSessionSnapshot?
+    @State private var defaultSettingsSessionStart: EditorSettings?
+    @State private var defaultColophonSessionStart: EditorSettings?
 
     init(
         documentStore: DocumentStore,
@@ -78,6 +80,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: presentedSettingsScope?.id) { oldScopeID, newScopeID in
+            if newScopeID == SettingsViewModel.Scope.userDefault.id {
+                defaultSettingsSessionStart =
+                    documentStore.userDefaultSettings
+            }
+
             if newScopeID == SettingsViewModel.Scope.activeWork.id {
                 let document = documentStore.document
                 activeFormatSettingsSession = ManuscriptFormatSessionSnapshot(
@@ -95,6 +102,31 @@ struct ContentView: View {
                 activeFormatSettingsSession = nil
                 manuscriptFormattingCoordinator.settingsDidDismiss(
                     initial: session
+                )
+            }
+
+            if oldScopeID == SettingsViewModel.Scope.userDefault.id,
+               newScopeID == nil,
+               let initial = defaultSettingsSessionStart {
+                defaultSettingsSessionStart = nil
+                documentStore.finishUserDefaultSettingsSession(
+                    startingFrom: initial
+                )
+            }
+        }
+        .onChange(of: presentedColophonScope?.id) {
+            oldScopeID, newScopeID in
+            if newScopeID == SettingsViewModel.Scope.userDefault.id {
+                defaultColophonSessionStart =
+                    documentStore.userDefaultSettings
+            }
+
+            if oldScopeID == SettingsViewModel.Scope.userDefault.id,
+               newScopeID == nil,
+               let initial = defaultColophonSessionStart {
+                defaultColophonSessionStart = nil
+                documentStore.finishUserDefaultSettingsSession(
+                    startingFrom: initial
                 )
             }
         }

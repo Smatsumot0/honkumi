@@ -98,6 +98,20 @@ final class CommonSettingsSessionTests: XCTestCase {
         )
     }
 
+    func testPublisherInformationChangeUsesTheSameFullSettingsSessionBoundary() {
+        let store = makeStore()
+        let initial = store.userDefaultSettings
+        var changed = initial
+        changed.colophon.authorName = "作者"
+        changed.colophon.circleName = "サークル"
+        store.updateUserDefaultSettings(changed)
+
+        XCTAssertTrue(
+            store.finishUserDefaultSettingsSession(startingFrom: initial)
+        )
+        XCTAssertEqual(store.userDefaultSettingsRevision, 1)
+    }
+
     private func makeStore() -> DocumentStore {
         DocumentStore(appData: .initial)
     }
