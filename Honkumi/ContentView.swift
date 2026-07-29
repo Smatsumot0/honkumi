@@ -30,8 +30,11 @@ struct ContentView: View {
         NavigationStack {
             WorkListView(
                 documentStore: documentStore,
-                onSelectWork: {
+                onSelectWork: { shouldFormat in
                     showsWorkspace = true
+                    if shouldFormat {
+                        manuscriptFormattingCoordinator.requestFormatting()
+                    }
                 },
                 onShowDefaultSettings: {
                     presentedSettingsInitialTab = .editor

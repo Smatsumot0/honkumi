@@ -92,6 +92,36 @@ final class UserDefaultSettingsReviewTests: XCTestCase {
         XCTAssertEqual(store.appData, before)
     }
 
+    func testAlreadyReviewedWorkCanBeSelectedWithoutARequest() {
+        let first = ManuscriptDocument(
+            title: "First",
+            body: "本文",
+            reviewedUserDefaultSettingsRevision: 2
+        )
+        let second = ManuscriptDocument(
+            title: "Second",
+            body: "本文",
+            reviewedUserDefaultSettingsRevision: 2
+        )
+        let store = DocumentStore(
+            appData: AppData(
+                version: AppData.currentVersion,
+                categories: [.uncategorized],
+                works: [first, second],
+                userDefaultSettings: .default,
+                activeWorkId: first.id,
+                subscriptionStatus: .free,
+                userDefaultSettingsRevision: 2
+            )
+        )
+
+        XCTAssertNil(
+            store.userDefaultSettingsReviewRequest(for: second.id)
+        )
+        store.selectWork(id: second.id)
+        XCTAssertEqual(store.document.id, second.id)
+    }
+
     private func makeStore(
         commonRevision: Int,
         reviewedRevision: Int

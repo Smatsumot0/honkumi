@@ -2,7 +2,7 @@ import SwiftUI
 
 struct WorkListView: View {
     @ObservedObject var documentStore: DocumentStore
-    let onSelectWork: () -> Void
+    let onSelectWork: (_ shouldFormat: Bool) -> Void
     let onShowDefaultSettings: () -> Void
     let onShowDefaultColophonSettings: () -> Void
 
@@ -17,6 +17,8 @@ struct WorkListView: View {
     @State private var showsNewWorkAlert = false
     @State private var showsRenameCategoryAlert = false
     @State private var showsRenameWorkAlert = false
+    @State private var pendingSettingsReview:
+        UserDefaultSettingsReviewRequest?
 
     var body: some View {
         List {
@@ -66,7 +68,7 @@ struct WorkListView: View {
             Button("作成") {
                 documentStore.createWork(title: workTitle, in: newWorkCategoryId)
                 newWorkCategoryId = nil
-                onSelectWork()
+                onSelectWork(false)
             }
             Button("キャンセル", role: .cancel) {
                 newWorkCategoryId = nil
@@ -95,6 +97,29 @@ struct WorkListView: View {
             Button("キャンセル", role: .cancel) {
                 editingWork = nil
             }
+        }
+        .alert(
+            "共通設定が変更されています",
+            isPresented: Binding(
+                get: { pendingSettingsReview != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingSettingsReview = nil
+                    }
+                }
+            )
+        ) {
+            Button("適用して開く") {
+                resolvePendingSettingsReview(.apply)
+            }
+            Button("適用せず開く") {
+                resolvePendingSettingsReview(.keepCurrent)
+            }
+            Button("キャンセル", role: .cancel) {
+                pendingSettingsReview = nil
+            }
+        } message: {
+            Text("現在の共通設定をこの作品に適用しますか？")
         }
         .confirmationDialog("移動先カテゴリ", isPresented: Binding(
             get: { movingWork != nil },
@@ -177,8 +202,13 @@ struct WorkListView: View {
 
     private func workButton(_ work: ManuscriptDocument) -> some View {
         Button {
-            documentStore.selectWork(id: work.id)
-            onSelectWork()
+            if let request = documentStore
+                .userDefaultSettingsReviewRequest(for: work.id) {
+                pendingSettingsReview = request
+            } else {
+                documentStore.selectWork(id: work.id)
+                onSelectWork(false)
+            }
         } label: {
             WorkRow(work: work)
         }
@@ -203,6 +233,19 @@ struct WorkListView: View {
                 documentStore.deleteWork(id: work.id)
             }
         }
+    }
+
+    private func resolvePendingSettingsReview(
+        _ decision: UserDefaultSettingsReviewDecision
+    ) {
+        guard let request = pendingSettingsReview else { return }
+        pendingSettingsReview = nil
+        let result = documentStore.resolveUserDefaultSettingsReview(
+            request,
+            decision: decision
+        )
+        guard result.didSelect else { return }
+        onSelectWork(result.shouldFormat)
     }
 
     private func moveDraggedWorks(_ items: [String], to categoryId: UUID) -> Bool {
