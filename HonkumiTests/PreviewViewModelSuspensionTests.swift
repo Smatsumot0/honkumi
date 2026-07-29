@@ -88,6 +88,46 @@ final class PreviewViewModelSuspensionTests: XCTestCase {
         XCTAssertTrue(exporter.documents.isEmpty)
     }
 
+    func testCommonPublisherChangeDoesNotOverwriteOrRegenerateUnappliedWork()
+        async throws {
+        var work = ManuscriptDocument(title: "Preview", body: "本文")
+        work.settings.colophon.authorName = "作品の作者"
+        var defaults = EditorSettings.default
+        defaults.colophon.authorName = "変更前の共通作者"
+        let store = DocumentStore(
+            appData: AppData(
+                version: AppData.currentVersion,
+                categories: [.uncategorized],
+                works: [work],
+                userDefaultSettings: defaults,
+                activeWorkId: work.id,
+                subscriptionStatus: .free,
+                userDefaultSettingsRevision: 1
+            )
+        )
+        let exporter = FakePreviewPDFExporter()
+        let viewModel = PreviewViewModel(
+            documentStore: store,
+            pdfExporter: exporter
+        )
+        viewModel.setPreviewActive(true, kind: .normal)
+        try await waitUntil {
+            exporter.documents.count == 1 &&
+                !viewModel.isGeneratingPDF
+        }
+        var changedDefaults = defaults
+        changedDefaults.colophon.authorName = "新しい共通作者"
+
+        store.updateUserDefaultSettings(changedDefaults)
+        try await Task.sleep(for: .milliseconds(450))
+
+        XCTAssertEqual(
+            viewModel.document.settings.colophon.authorName,
+            "作品の作者"
+        )
+        XCTAssertEqual(exporter.documents.count, 1)
+    }
+
     private func makeStore() -> DocumentStore {
         let document = ManuscriptDocument(title: "Preview", body: "本文")
         return DocumentStore(

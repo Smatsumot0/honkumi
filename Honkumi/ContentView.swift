@@ -426,8 +426,7 @@ private struct WorkspaceView: View {
     }
 
     private func outputDocument(from document: ManuscriptDocument? = nil) -> ManuscriptDocument {
-        (document ?? documentStore.document)
-            .applyingPublisherInfo(from: documentStore.userDefaultSettings)
+        document ?? documentStore.document
     }
 }
 

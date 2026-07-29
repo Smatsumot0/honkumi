@@ -837,16 +837,16 @@ final class PreviewViewModel: ObservableObject {
     ) {
         self.documentStore = documentStore
         self.pdfExporter = pdfExporter
-        self.document = documentStore.document.applyingPublisherInfo(from: documentStore.userDefaultSettings)
+        self.document = documentStore.document
 
         documentStore.$document
+            .removeDuplicates()
             .sink { [weak self] document in
                 guard let self else { return }
-                let previewDocument = self.previewDocument(from: document)
-                self.document = previewDocument
+                self.document = document
                 if self.isPreviewActive && !self.isGenerationSuspended {
                     self.preparePreview(
-                        for: previewDocument,
+                        for: document,
                         kind: self.activePreviewKind,
                         debounceMilliseconds: 350
                     )
@@ -857,13 +857,12 @@ final class PreviewViewModel: ObservableObject {
             .store(in: &cancellables)
 
         documentStore.$appData
-            .map { ($0.userDefaultSettings, $0.subscriptionStatus) }
-            .removeDuplicates { previous, current in
-                previous.0 == current.0 && previous.1 == current.1
-            }
+            .map(\.subscriptionStatus)
+            .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] _ in
                 guard let self else { return }
-                let previewDocument = self.previewDocument(from: self.documentStore.document)
+                let previewDocument = self.documentStore.document
                 self.document = previewDocument
                 guard self.isPreviewActive, !self.isGenerationSuspended else { return }
                 self.preparePreview(
@@ -897,7 +896,7 @@ final class PreviewViewModel: ObservableObject {
     }
 
     func preparePreviewIfNeeded(for kind: PreviewPDFKind = .normal) {
-        let previewDocument = previewDocument(from: documentStore.document)
+        let previewDocument = documentStore.document
         document = previewDocument
 
         if activePreviewKind != kind {
@@ -1052,10 +1051,6 @@ final class PreviewViewModel: ObservableObject {
                 )
             }
         }
-    }
-
-    private func previewDocument(from document: ManuscriptDocument) -> ManuscriptDocument {
-        document.applyingPublisherInfo(from: documentStore.userDefaultSettings)
     }
 
     private func applyGeneratedPDF(
