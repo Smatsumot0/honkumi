@@ -11,6 +11,7 @@ nonisolated enum InitialSampleWork {
 
     static func document(
         settings: EditorSettings,
+        reviewedUserDefaultSettingsRevision: Int = 0,
         createdAt: Date = Date()
     ) -> ManuscriptDocument {
         ManuscriptDocument(
@@ -19,7 +20,9 @@ nonisolated enum InitialSampleWork {
             body: sampleBody,
             settings: settings.validated,
             createdAt: createdAt,
-            updatedAt: createdAt
+            updatedAt: createdAt,
+            reviewedUserDefaultSettingsRevision:
+                reviewedUserDefaultSettingsRevision
         )
     }
 
@@ -38,7 +41,12 @@ nonisolated enum InitialSampleWork {
             seededData.categories.insert(.uncategorized, at: 0)
         }
 
-        let sample = document(settings: settings, createdAt: createdAt)
+        let sample = document(
+            settings: settings,
+            reviewedUserDefaultSettingsRevision:
+                data.userDefaultSettingsRevision,
+            createdAt: createdAt
+        )
         seededData.works.insert(sample, at: 0)
         seededData.activeWorkId = sample.id
         return SeedResult(data: seededData, didCreateSample: true)

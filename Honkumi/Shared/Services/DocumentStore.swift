@@ -143,7 +143,9 @@ final class DocumentStore: ObservableObject {
                 categoryId: categoryExists ? targetCategoryId : WorkCategory.uncategorizedId,
                 title: trimmedTitle.isEmpty ? "無題の作品" : trimmedTitle,
                 body: "",
-                settings: Self.settingsForNewWork(from: data.userDefaultSettings)
+                settings: Self.settingsForNewWork(from: data.userDefaultSettings),
+                reviewedUserDefaultSettingsRevision:
+                    data.userDefaultSettingsRevision
             )
             data.works.append(createdWork)
             data.activeWorkId = createdWork.id
@@ -157,7 +159,11 @@ final class DocumentStore: ObservableObject {
             if data.works.isEmpty {
                 let work = ManuscriptDocument(
                     title: "無題の作品",
-                    settings: Self.settingsForNewWork(from: data.userDefaultSettings)
+                    settings: Self.settingsForNewWork(
+                        from: data.userDefaultSettings
+                    ),
+                    reviewedUserDefaultSettingsRevision:
+                        data.userDefaultSettingsRevision
                 )
                 data.works = [work]
                 data.activeWorkId = work.id
@@ -358,7 +364,11 @@ final class DocumentStore: ObservableObject {
         if normalizedData.works.isEmpty {
             let work = ManuscriptDocument(
                 title: "無題の作品",
-                settings: Self.settingsForNewWork(from: normalizedData.userDefaultSettings)
+                settings: Self.settingsForNewWork(
+                    from: normalizedData.userDefaultSettings
+                ),
+                reviewedUserDefaultSettingsRevision:
+                    normalizedData.userDefaultSettingsRevision
             )
             normalizedData.works = [work]
             normalizedData.activeWorkId = work.id

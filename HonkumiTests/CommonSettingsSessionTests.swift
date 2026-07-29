@@ -52,6 +52,52 @@ final class CommonSettingsSessionTests: XCTestCase {
         XCTAssertEqual(store.userDefaultSettingsRevision, 2)
     }
 
+    func testNewWorkUsesExistingInitializationRulesAndCurrentRevision() {
+        var data = AppData.initial
+        data.userDefaultSettingsRevision = 4
+        data.userDefaultSettings.useRecommendedTypography = false
+        data.userDefaultSettings.useRecommendedMargins = false
+        data.userDefaultSettings.editorFontSize = 17
+        let store = DocumentStore(appData: data)
+
+        let work = store.createWork(title: "新作")
+
+        XCTAssertEqual(work.reviewedUserDefaultSettingsRevision, 4)
+        XCTAssertEqual(work.settings.editorFontSize, 17)
+        XCTAssertTrue(work.settings.useRecommendedTypography)
+        XCTAssertTrue(work.settings.useRecommendedMargins)
+    }
+
+    func testDeleteLastWorkCreatesReviewedFallback() {
+        var data = AppData.initial
+        data.userDefaultSettingsRevision = 3
+        let store = DocumentStore(appData: data)
+        let onlyID = store.document.id
+
+        store.deleteWork(id: onlyID)
+
+        XCTAssertEqual(
+            store.document.reviewedUserDefaultSettingsRevision,
+            3
+        )
+    }
+
+    func testInitialSampleRecordsCurrentRevision() {
+        var data = AppData.emptyLibrary
+        data.userDefaultSettingsRevision = 5
+
+        let result = InitialSampleWork.seedIfNeeded(
+            in: data,
+            hasCreatedInitialSample: false,
+            settings: data.userDefaultSettings
+        )
+
+        XCTAssertEqual(
+            result.data.works.first?.reviewedUserDefaultSettingsRevision,
+            5
+        )
+    }
+
     private func makeStore() -> DocumentStore {
         DocumentStore(appData: .initial)
     }
