@@ -4,10 +4,27 @@ struct ContentView: View {
     @ObservedObject var documentStore: DocumentStore
     @ObservedObject var proStore: HonkumiProStore
     let pdfExportAdService: PDFExportAdService
+    @StateObject private var manuscriptFormattingCoordinator: ManuscriptFormattingCoordinator
     @State private var showsWorkspace = false
     @State private var presentedSettingsScope: SettingsViewModel.Scope?
     @State private var presentedSettingsInitialTab: SettingsInitialTab = .editor
     @State private var presentedColophonScope: SettingsViewModel.Scope?
+    @State private var activeFormatSettingsSession: ManuscriptFormatSessionSnapshot?
+
+    init(
+        documentStore: DocumentStore,
+        proStore: HonkumiProStore,
+        pdfExportAdService: PDFExportAdService
+    ) {
+        _documentStore = ObservedObject(wrappedValue: documentStore)
+        _proStore = ObservedObject(wrappedValue: proStore)
+        self.pdfExportAdService = pdfExportAdService
+        _manuscriptFormattingCoordinator = StateObject(
+            wrappedValue: ManuscriptFormattingCoordinator(
+                documentStore: documentStore
+            )
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -29,6 +46,7 @@ struct ContentView: View {
                     documentStore: documentStore,
                     proStore: proStore,
                     pdfExportAdService: pdfExportAdService,
+                    manuscriptFormattingCoordinator: manuscriptFormattingCoordinator,
                     presentedSettingsScope: $presentedSettingsScope,
                     presentedSettingsInitialTab: $presentedSettingsInitialTab
                 )
@@ -56,12 +74,32 @@ struct ContentView: View {
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
+        .onChange(of: presentedSettingsScope?.id) { oldScopeID, newScopeID in
+            if newScopeID == SettingsViewModel.Scope.activeWork.id {
+                let document = documentStore.document
+                activeFormatSettingsSession = ManuscriptFormatSessionSnapshot(
+                    documentID: document.id,
+                    formatSettings: document.settings.formatSettings,
+                    formatOptions: FormatOptions(
+                        isPremiumUser: documentStore.subscriptionStatus == .paid
+                    )
+                )
+            }
+
+            if oldScopeID == SettingsViewModel.Scope.activeWork.id,
+               newScopeID == nil,
+               let session = activeFormatSettingsSession {
+                activeFormatSettingsSession = nil
+                manuscriptFormattingCoordinator.settingsDidDismiss(
+                    initial: session
+                )
+            }
+        }
         .task {
             proStore.start()
-            pdfExportAdService.updateEntitlementState(proStore.entitlementState)
+            synchronizeProEntitlement(proStore.entitlementState)
             await proStore.refreshPurchasedStatus()
-            documentStore.setProUnlocked(proStore.isProUnlocked)
-            pdfExportAdService.updateEntitlementState(proStore.entitlementState)
+            synchronizeProEntitlement(proStore.entitlementState)
             if !ProcessInfo.processInfo.isRunningXCTest {
                 Task(priority: .utility) {
                     await pdfExportAdService.prepareForAppLaunch()
@@ -69,8 +107,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: proStore.entitlementState) { _, entitlementState in
-            documentStore.setProUnlocked(entitlementState.isProUnlocked)
-            pdfExportAdService.updateEntitlementState(entitlementState)
+            synchronizeProEntitlement(entitlementState)
             if !ProcessInfo.processInfo.isRunningXCTest {
                 Task(priority: .utility) {
                     await pdfExportAdService.preloadAdIfEligible()
@@ -78,11 +115,26 @@ struct ContentView: View {
             }
         }
     }
+
+    private func synchronizeProEntitlement(
+        _ entitlementState: ProEntitlementState
+    ) {
+        let previousStatus = documentStore.subscriptionStatus
+        documentStore.setProUnlocked(entitlementState.isProUnlocked)
+        pdfExportAdService.updateEntitlementState(entitlementState)
+
+        if previousStatus == .free,
+           documentStore.subscriptionStatus == .paid,
+           presentedSettingsScope?.id != SettingsViewModel.Scope.activeWork.id {
+            manuscriptFormattingCoordinator.proDidUnlockOutsideSettings()
+        }
+    }
 }
 
 private struct WorkspaceView: View {
     @ObservedObject var documentStore: DocumentStore
     @ObservedObject var proStore: HonkumiProStore
+    @ObservedObject var manuscriptFormattingCoordinator: ManuscriptFormattingCoordinator
     let pdfExportAdService: PDFExportAdService
     @Binding var presentedSettingsScope: SettingsViewModel.Scope?
     @Binding var presentedSettingsInitialTab: SettingsInitialTab
@@ -107,11 +159,13 @@ private struct WorkspaceView: View {
         documentStore: DocumentStore,
         proStore: HonkumiProStore,
         pdfExportAdService: PDFExportAdService,
+        manuscriptFormattingCoordinator: ManuscriptFormattingCoordinator,
         presentedSettingsScope: Binding<SettingsViewModel.Scope?>,
         presentedSettingsInitialTab: Binding<SettingsInitialTab>
     ) {
         self.documentStore = documentStore
         self.proStore = proStore
+        self.manuscriptFormattingCoordinator = manuscriptFormattingCoordinator
         self.pdfExportAdService = pdfExportAdService
         self._presentedSettingsScope = presentedSettingsScope
         self._presentedSettingsInitialTab = presentedSettingsInitialTab
@@ -144,6 +198,24 @@ private struct WorkspaceView: View {
                         PreviewView(viewModel: previewViewModel, displayMode: .spread)
                     }
                 }
+            }
+        }
+        .overlay {
+            if manuscriptFormattingCoordinator.isFormatting {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("フォーマット中")
+                        .font(.footnote.weight(.medium))
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+                .background(
+                    .regularMaterial,
+                    in: RoundedRectangle(cornerRadius: 14)
+                )
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("フォーマット中")
             }
         }
         .navigationTitle(documentStore.document.title)
