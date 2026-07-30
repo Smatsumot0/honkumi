@@ -336,11 +336,12 @@ private final class CircleLogoSVGSizeParser: NSObject, XMLParserDelegate {
 
     private static func viewBoxSize(_ value: String?) -> CGSize? {
         guard let value else { return nil }
-        let values = value
+        let tokens = value
             .replacingOccurrences(of: ",", with: " ")
             .split(whereSeparator: \.isWhitespace)
-            .compactMap { Double($0) }
-        guard values.count == 4,
+        let values = tokens.compactMap { Double($0) }
+        guard tokens.count == 4,
+              values.count == 4,
               values.allSatisfy(\.isFinite),
               values[2] > 0,
               values[3] > 0 else {

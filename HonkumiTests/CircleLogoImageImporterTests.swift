@@ -155,6 +155,22 @@ final class CircleLogoImageImporterTests: XCTestCase {
         }
     }
 
+    func testPercentageDimensionsWithNonNumericViewBoxRemainInvalid() async {
+        do {
+            _ = try await CircleLogoImageImporter.importedImageData(
+                Data("""
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     width="100%" height="100%"
+                     viewBox="junk 0 0 1024 1024"></svg>
+                """.utf8),
+                contentType: .svg
+            )
+            XCTFail("Expected invalid SVG")
+        } catch {
+            XCTAssertEqual(error as? CircleLogoImageImportError, .invalidSVG)
+        }
+    }
+
     func testInvalidSVGThrowsSpecificImportError() async {
         do {
             _ = try await CircleLogoImageImporter.importedImageData(
