@@ -1,6 +1,6 @@
 import Foundation
 
-struct FormatRule: Identifiable, Equatable {
+nonisolated struct FormatRule: Identifiable, Equatable {
     let id: WritableKeyPath<FormatSettings, Bool>
     let label: String
     let description: String
