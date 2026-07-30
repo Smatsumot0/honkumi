@@ -32,17 +32,19 @@ struct ColophonSettingsView: View {
         .onChange(of: selectedCircleImageItem) { _, item in
             loadImageData(from: item)
         }
-        .confirmationDialog(
-            "サークルロゴの選択方法",
+        .alert(
+            CircleLogoImportCopy.sourceTitle,
             isPresented: circleLogoPresentationBinding(for: .sourceChooser)
         ) {
-            Button("写真から選択") {
+            Button(CircleLogoImportCopy.photoSource) {
                 circleLogoImportPresentation.present(.photoLibrary)
             }
-            Button("ファイルから選択") {
+            Button(CircleLogoImportCopy.fileSource) {
                 circleLogoImportPresentation.present(.fileImporter)
             }
-            Button("キャンセル", role: .cancel) {}
+            Button(CircleLogoImportCopy.cancel, role: .cancel) {}
+        } message: {
+            Text(CircleLogoImportCopy.sourceMessage)
         }
         .photosPicker(
             isPresented: circleLogoPresentationBinding(for: .photoLibrary),
@@ -51,7 +53,7 @@ struct ColophonSettingsView: View {
         )
         .fileImporter(
             isPresented: circleLogoPresentationBinding(for: .fileImporter),
-            allowedContentTypes: [.image],
+            allowedContentTypes: CircleLogoImportFileTypes.allowed,
             allowsMultipleSelection: false,
             onCompletion: handleCircleImageFileImport
         )
@@ -170,13 +172,20 @@ struct ColophonSettingsView: View {
             HStack {
                 imagePreview(data: imageData)
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     Button {
                         circleLogoImportPresentation.present(.sourceChooser)
                     } label: {
-                        Label("サークルロゴを選択", systemImage: "photo.on.rectangle")
+                        Label(
+                            CircleLogoImportCopy.uploadButton,
+                            systemImage: "photo.on.rectangle"
+                        )
                     }
                     .accessibilityIdentifier("colophon.circleLogo.select")
+
+                    Text(CircleLogoImportCopy.monochromeRecommendation)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -280,6 +289,9 @@ struct ColophonSettingsView: View {
                     colophon.circleImageData = validatedData
                 }
             } catch {
+                guard !CircleLogoImageImporter.isCancellation(error) else {
+                    return
+                }
                 circleImageImportErrorMessage = error.localizedDescription
             }
         }
@@ -298,10 +310,16 @@ struct ColophonSettingsView: View {
                         colophon.circleImageData = data
                     }
                 } catch {
+                    guard !CircleLogoImageImporter.isCancellation(error) else {
+                        return
+                    }
                     circleImageImportErrorMessage = error.localizedDescription
                 }
             }
         } catch {
+            guard !CircleLogoImageImporter.isCancellation(error) else {
+                return
+            }
             circleImageImportErrorMessage = error.localizedDescription
         }
     }
