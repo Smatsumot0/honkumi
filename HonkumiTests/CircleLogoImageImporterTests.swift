@@ -104,6 +104,57 @@ final class CircleLogoImageImporterTests: XCTestCase {
         XCTAssertEqual(cgImage.height, 2048)
     }
 
+    func testPercentageDimensionsUseSquareViewBox() async throws {
+        let data = Data("""
+        <svg xmlns="http://www.w3.org/2000/svg"
+             width="100%" height="100%" viewBox="0 0 1024 1024">
+          <rect width="1024" height="1024" fill="#000"/>
+        </svg>
+        """.utf8)
+
+        let png = try await CircleLogoImageImporter.importedImageData(
+            data,
+            contentType: .svg
+        )
+        let image = try XCTUnwrap(UIImage(data: png)?.cgImage)
+
+        XCTAssertEqual(image.width, 2048)
+        XCTAssertEqual(image.height, 2048)
+    }
+
+    func testPercentageDimensionsUseWideViewBox() async throws {
+        let data = Data("""
+        <svg xmlns="http://www.w3.org/2000/svg"
+             width="100%" height="100%" viewBox="0 0 2400 1000">
+          <rect width="2400" height="1000" fill="#000"/>
+        </svg>
+        """.utf8)
+
+        let png = try await CircleLogoImageImporter.importedImageData(
+            data,
+            contentType: .svg
+        )
+        let image = try XCTUnwrap(UIImage(data: png)?.cgImage)
+
+        XCTAssertEqual(image.width, 2048)
+        XCTAssertEqual(image.height, 853)
+    }
+
+    func testPercentageDimensionsWithoutViewBoxRemainInvalid() async {
+        do {
+            _ = try await CircleLogoImageImporter.importedImageData(
+                Data("""
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     width="100%" height="100%"></svg>
+                """.utf8),
+                contentType: .svg
+            )
+            XCTFail("Expected invalid SVG")
+        } catch {
+            XCTAssertEqual(error as? CircleLogoImageImportError, .invalidSVG)
+        }
+    }
+
     func testInvalidSVGThrowsSpecificImportError() async {
         do {
             _ = try await CircleLogoImageImporter.importedImageData(

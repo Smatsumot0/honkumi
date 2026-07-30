@@ -226,6 +226,18 @@ private final class CircleLogoSVGRenderer: NSObject, WKNavigationDelegate {
 
 @MainActor
 private final class CircleLogoSVGSizeParser: NSObject, XMLParserDelegate {
+    private enum RootDimension: Equatable {
+        case absolute(CGFloat)
+        case relative
+        case unspecified
+        case invalid
+
+        var absoluteValue: CGFloat? {
+            guard case let .absolute(value) = self else { return nil }
+            return value
+        }
+    }
+
     private var rootSize: CGSize?
     private var foundSVGRoot = false
 
@@ -257,19 +269,12 @@ private final class CircleLogoSVGSizeParser: NSObject, XMLParserDelegate {
         }
 
         let viewBoxSize = Self.viewBoxSize(attributeDict["viewBox"])
-        let width = Self.length(attributeDict["width"])
-        let height = Self.length(attributeDict["height"])
-        let hasWidth = attributeDict["width"] != nil
-        let hasHeight = attributeDict["height"] != nil
+        let width = Self.rootDimension(attributeDict["width"])
+        let height = Self.rootDimension(attributeDict["height"])
 
-        if hasWidth, width == nil {
-            return
-        }
-        if hasHeight, height == nil {
-            return
-        }
+        guard width != .invalid, height != .invalid else { return }
 
-        switch (width, height, viewBoxSize) {
+        switch (width.absoluteValue, height.absoluteValue, viewBoxSize) {
         case let (.some(width), .some(height), _):
             rootSize = CGSize(width: width, height: height)
         case let (.some(width), nil, .some(viewBox)):
@@ -289,18 +294,22 @@ private final class CircleLogoSVGSizeParser: NSObject, XMLParserDelegate {
         }
     }
 
-    private static func length(_ value: String?) -> CGFloat? {
-        guard let value else { return nil }
+    private static func rootDimension(_ value: String?) -> RootDimension {
+        guard let value else { return .unspecified }
         let scanner = Scanner(string: value)
         scanner.locale = Locale(identifier: "en_US_POSIX")
         guard let number = scanner.scanDouble(),
               number.isFinite,
               number > 0 else {
-            return nil
+            return .invalid
         }
         let suffix = value[scanner.currentIndex...]
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+        if suffix == "%" {
+            return .relative
+        }
+
         let multiplier: Double
         switch suffix {
         case "", "px":
@@ -318,11 +327,11 @@ private final class CircleLogoSVGSizeParser: NSObject, XMLParserDelegate {
         case "q":
             multiplier = 96 / 101.6
         default:
-            return nil
+            return .invalid
         }
         let result = number * multiplier
-        guard result.isFinite, result > 0 else { return nil }
-        return CGFloat(result)
+        guard result.isFinite, result > 0 else { return .invalid }
+        return .absolute(CGFloat(result))
     }
 
     private static func viewBoxSize(_ value: String?) -> CGSize? {
