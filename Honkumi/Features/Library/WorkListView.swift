@@ -18,7 +18,7 @@ struct WorkListView: View {
     @State private var showsRenameCategoryAlert = false
     @State private var showsRenameWorkAlert = false
     @State private var pendingSettingsReview:
-        UserDefaultSettingsReviewRequest?
+        CommonSettingsReviewPresentation?
 
     var body: some View {
         List {
@@ -98,29 +98,6 @@ struct WorkListView: View {
                 editingWork = nil
             }
         }
-        .alert(
-            "共通設定が変更されています",
-            isPresented: Binding(
-                get: { pendingSettingsReview != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingSettingsReview = nil
-                    }
-                }
-            )
-        ) {
-            Button("適用して開く") {
-                resolvePendingSettingsReview(.apply(.all))
-            }
-            Button("適用せず開く") {
-                resolvePendingSettingsReview(.keepCurrent)
-            }
-            Button("キャンセル", role: .cancel) {
-                pendingSettingsReview = nil
-            }
-        } message: {
-            Text("現在の共通設定をこの作品に適用しますか？")
-        }
         .confirmationDialog("移動先カテゴリ", isPresented: Binding(
             get: { movingWork != nil },
             set: { isPresented in
@@ -136,6 +113,26 @@ struct WorkListView: View {
                         movingWork = nil
                     }
                 }
+            }
+        }
+        .overlay {
+            if pendingSettingsReview != nil {
+                ZStack {
+                    Color.black.opacity(0.28)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {}
+
+                    CommonSettingsReviewDialog(
+                        selection: pendingSelectionBinding,
+                        onApply: applyPendingSettingsReview,
+                        onKeepCurrent: keepCurrentPendingSettingsReview,
+                        onCancel: { pendingSettingsReview = nil }
+                    )
+                    .padding(24)
+                }
+                .transition(.opacity)
+                .zIndex(10)
             }
         }
     }
@@ -204,7 +201,9 @@ struct WorkListView: View {
         Button {
             if let request = documentStore
                 .userDefaultSettingsReviewRequest(for: work.id) {
-                pendingSettingsReview = request
+                pendingSettingsReview = CommonSettingsReviewPresentation(
+                    request: request
+                )
             } else {
                 documentStore.selectWork(id: work.id)
                 onSelectWork(false)
@@ -235,10 +234,39 @@ struct WorkListView: View {
         }
     }
 
+    private var pendingSelectionBinding:
+        Binding<UserDefaultSettingsSelection> {
+        Binding(
+            get: { pendingSettingsReview?.selection ?? .all },
+            set: { newSelection in
+                pendingSettingsReview?.selection = newSelection
+            }
+        )
+    }
+
+    private func applyPendingSettingsReview() {
+        guard let presentation = pendingSettingsReview,
+              presentation.canApply else {
+            return
+        }
+        resolvePendingSettingsReview(
+            presentation.request,
+            decision: .apply(presentation.selection)
+        )
+    }
+
+    private func keepCurrentPendingSettingsReview() {
+        guard let presentation = pendingSettingsReview else { return }
+        resolvePendingSettingsReview(
+            presentation.request,
+            decision: .keepCurrent
+        )
+    }
+
     private func resolvePendingSettingsReview(
-        _ decision: UserDefaultSettingsReviewDecision
+        _ request: UserDefaultSettingsReviewRequest,
+        decision: UserDefaultSettingsReviewDecision
     ) {
-        guard let request = pendingSettingsReview else { return }
         pendingSettingsReview = nil
         let result = documentStore.resolveUserDefaultSettingsReview(
             request,
