@@ -1,4 +1,5 @@
 @testable import Honkumi
+import UniformTypeIdentifiers
 import XCTest
 
 final class CircleLogoImportPresentationTests: XCTestCase {
@@ -20,5 +21,21 @@ final class CircleLogoImportPresentationTests: XCTestCase {
         presentation.dismiss(.fileImporter)
 
         XCTAssertNil(presentation.destination)
+    }
+
+    func testApprovedCircleLogoCopy() {
+        XCTAssertEqual(CircleLogoImportCopy.uploadButton, "アップロード")
+        XCTAssertEqual(
+            CircleLogoImportCopy.monochromeRecommendation,
+            "ロゴはモノクロを推奨します。"
+        )
+        XCTAssertEqual(CircleLogoImportCopy.photoSource, "写真から選択")
+        XCTAssertEqual(CircleLogoImportCopy.fileSource, "ファイルから選択")
+        XCTAssertEqual(CircleLogoImportCopy.cancel, "キャンセル")
+    }
+
+    func testFileTypesExplicitlyContainImageAndSVG() {
+        XCTAssertTrue(CircleLogoImportFileTypes.allowed.contains(.image))
+        XCTAssertTrue(CircleLogoImportFileTypes.allowed.contains(.svg))
     }
 }

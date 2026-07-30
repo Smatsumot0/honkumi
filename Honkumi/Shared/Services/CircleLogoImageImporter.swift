@@ -31,6 +31,15 @@ nonisolated enum CircleLogoImageImporter {
         return data
     }
 
+    static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        let error = error as NSError
+        return error.domain == NSCocoaErrorDomain &&
+            error.code == CocoaError.Code.userCancelled.rawValue
+    }
+
     static func importedImageData(
         _ data: Data,
         contentType: UTType?

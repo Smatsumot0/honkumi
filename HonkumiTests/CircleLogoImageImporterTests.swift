@@ -119,6 +119,25 @@ final class CircleLogoImageImporterTests: XCTestCase {
         }
     }
 
+    func testCancellationErrorsAreRecognized() {
+        XCTAssertTrue(
+            CircleLogoImageImporter.isCancellation(CancellationError())
+        )
+        XCTAssertTrue(
+            CircleLogoImageImporter.isCancellation(
+                NSError(
+                    domain: NSCocoaErrorDomain,
+                    code: CocoaError.Code.userCancelled.rawValue
+                )
+            )
+        )
+        XCTAssertFalse(
+            CircleLogoImageImporter.isCancellation(
+                CircleLogoImageImportError.invalidImage
+            )
+        )
+    }
+
     private static let transparentSVG = """
     <svg xmlns="http://www.w3.org/2000/svg" width="10" height="20">
       <rect x="0" y="0" width="5" height="20" fill="#000000"/>
