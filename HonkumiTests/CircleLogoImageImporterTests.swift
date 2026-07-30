@@ -138,6 +138,21 @@ final class CircleLogoImageImporterTests: XCTestCase {
         )
     }
 
+    func testConvertedSVGDataSupportsExistingUIImageAndCGImageConsumers()
+        async throws {
+        let pngData = try await CircleLogoImageImporter.importedImageData(
+            Data(Self.transparentSVG.utf8),
+            contentType: .svg
+        )
+
+        let uiImage = try XCTUnwrap(UIImage(data: pngData))
+        let cgImage = try XCTUnwrap(uiImage.cgImage)
+
+        XCTAssertEqual(cgImage.width, 1024)
+        XCTAssertEqual(cgImage.height, 2048)
+        XCTAssertNotNil(uiImage.pngData())
+    }
+
     private static let transparentSVG = """
     <svg xmlns="http://www.w3.org/2000/svg" width="10" height="20">
       <rect x="0" y="0" width="5" height="20" fill="#000000"/>
