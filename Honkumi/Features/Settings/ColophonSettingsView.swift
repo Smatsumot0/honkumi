@@ -292,7 +292,7 @@ struct ColophonSettingsView: View {
             Task {
                 do {
                     let data = try await Task.detached {
-                        try CircleLogoImageImporter.loadImageData(from: url)
+                        try await CircleLogoImageImporter.loadImageData(from: url)
                     }.value
                     viewModel.updateColophon { colophon in
                         colophon.circleImageData = data
