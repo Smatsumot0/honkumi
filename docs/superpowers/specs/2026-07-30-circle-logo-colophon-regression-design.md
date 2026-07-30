@@ -1,73 +1,76 @@
-# Circle Logo and Colophon Regression Design
+# サークルロゴ・奥付不具合修正 設計書
 
-## Goal
+## 目的
 
-Fix the circle-logo and colophon regressions reported from the device build without adding preview or PDF runtime work:
+実機版で確認されたサークルロゴと奥付の不具合を、プレビューやPDF生成時の処理負荷を増やさずに修正する。
 
-- Accept the supplied `logo.svg` and `title.svg`.
-- Remove the monochrome recommendation copy.
-- Hide author and circle controls and output rows while a circle logo is actively used.
-- Preserve work-specific colophon settings when common settings are applied.
-- Left-align the website URL with other colophon values and center the QR code over that URL.
+- 提供された`logo.svg`と`title.svg`を読み込めるようにする。
+- 「ロゴはモノクロを推奨します。」の表示を削除する。
+- サークルロゴを使用している間は、作者とサークルの設定項目および出力行を非表示にする。
+- 共通設定を作品へ適用しても、作品固有の奥付設定を保持する。
+- URLを他の奥付項目と頭揃えにし、QRコードをURLに対して中央に配置する。
 
-## Confirmed Root Causes
+## 確認済みの原因
 
-### Percentage-sized SVG files are rejected before rendering
+### パーセント指定されたSVGが描画前に拒否される
 
-Both supplied SVG files use `width="100%"` and `height="100%"` with a valid `viewBox`. `CircleLogoSVGSizeParser` currently treats an explicit unsupported length as fatal, so it returns before using the valid `viewBox`.
+提供された2つのSVGは、どちらも`width="100%"`、`height="100%"`と有効な`viewBox`を持っている。現在の`CircleLogoSVGSizeParser`は、明示されている未対応の長さをエラーとして扱うため、有効な`viewBox`を参照する前に読み込みを中止している。
 
-The supplied intrinsic sizes are:
+提供されたSVGの固有サイズは次のとおり。
 
-- `logo.svg`: `viewBox="0 0 1024 1024"`
-- `title.svg`: `viewBox="0 0 2400 1000"`
+- `logo.svg`：`viewBox="0 0 1024 1024"`
+- `title.svg`：`viewBox="0 0 2400 1000"`
 
-### Common settings replace work-specific colophon state
+### 共通設定が作品固有の奥付設定を上書きする
 
-`DocumentStore.resolveUserDefaultSettingsReview` currently assigns the complete validated common `EditorSettings` to the work. The common colophon screen does not expose the work-specific `isEnabled` option, so its stored `false` value disables a colophon that the work had enabled.
+`DocumentStore.resolveUserDefaultSettingsReview`は、現在、検証済みの共通`EditorSettings`全体を作品へ代入している。共通の奥付設定画面には作品固有の`isEnabled`がないため、共通側に保存された`false`によって、作品側で有効にしていた奥付まで無効になる。
 
-### Horizontal QR layout centers the URL block
+### 横書き奥付でURLを含むブロック全体が中央寄せされる
 
-`drawHorizontalColophonHPEntry` currently centers a combined QR-and-URL block in the value column. This shifts the URL right instead of starting it at the same value position as the other colophon rows.
+`drawHorizontalColophonHPEntry`は、現在、QRコードとURLを一つのブロックとして値欄の中央へ配置している。そのため、URLの左端が他の奥付項目より右へずれる。
 
-## Design
+## 設計
 
-### SVG import
+### SVGの読み込み
 
-Keep the existing upload-time WebKit conversion and PNG storage. No SVG parsing or rendering is added to preview or PDF generation.
+現在の「アップロード時にWebKitでSVGを変換し、PNGとして保存する」方式を維持する。プレビューやPDF生成時にSVGの解析・描画処理は追加しない。
 
-The size parser will classify root dimensions as either:
+SVGルートの寸法を次の2種類に分類する。
 
-- absolute supported lengths, such as unitless values, `px`, `pt`, `pc`, `in`, `cm`, `mm`, or `q`; or
-- relative/unspecified dimensions, such as percentages.
+- 単位なし、`px`、`pt`、`pc`、`in`、`cm`、`mm`、`q`など、対応済みの絶対長
+- パーセントなどの相対長、または寸法指定なし
 
-Absolute width and height continue to determine the source size. A missing or relative dimension falls back to the corresponding ratio from a valid `viewBox`. When both dimensions are relative, the complete `viewBox` size is used. Import remains an error when no positive finite size can be derived.
+幅と高さがどちらも有効な絶対長なら、従来どおりその値を固有サイズとして使用する。寸法が未指定または相対長の場合は、有効な`viewBox`の縦横比またはサイズへフォールバックする。幅と高さが両方とも相対長なら、`viewBox`全体のサイズを使用する。
 
-The renderer keeps its current 2048-pixel maximum long edge and transparent PNG output. Raster imports continue to preserve their original bytes.
+正の有限値となるサイズをどの指定からも取得できない場合だけ、従来どおりSVG読込エラーにする。
 
-### Settings UI and colophon entries
+変換後のPNGは、長辺最大2048ピクセル、透明背景を維持する。PNGやJPEGなどのラスター画像は、従来どおり元のバイト列を保持する。
 
-Remove `CircleLogoImportCopy.monochromeRecommendation` and its `Text` view.
+### 設定画面と奥付項目
 
-Use `ColophonSettings.hasCreatorImage` as the single active-logo condition. It is true only when:
+`CircleLogoImportCopy.monochromeRecommendation`と、それを表示する`Text`を削除する。
 
-- `usesCircleImageForCreator` is enabled; and
-- `circleImageData` exists.
+ロゴが実際に使用中かどうかは、既存の`ColophonSettings.hasCreatorImage`だけで判定する。この値は次の両方を満たすときだけ`true`になる。
 
-While that condition is true:
+- `usesCircleImageForCreator`が有効
+- `circleImageData`が存在する
 
-- hide the author visibility toggle and author text field;
-- hide the circle visibility toggle and circle text field;
-- omit the author and circle entries from preview and PDF pagination.
+ロゴを使用している間は、次の項目を非表示にする。
 
-The author and circle strings and their visibility flags remain stored unchanged. Disabling or deleting the logo makes the controls and entries available again with their prior values.
+- 作者名表示のトグルと作者名入力欄
+- サークル名表示のトグルとサークル名入力欄
+- プレビューおよびPDFの作者行
+- プレビューおよびPDFのサークル行
 
-### Applying common settings
+作者名、サークル名、および各表示フラグの保存値は変更しない。ロゴを無効化または削除した場合は、以前の値を保ったまま設定項目と出力行を復元する。
 
-Common settings still replace all non-colophon work settings as before.
+### 共通設定の適用
 
-Colophon settings are merged instead of replaced. Begin with the work's current colophon and copy the common publisher information through the existing `applyingPublisherInfo(from:)` boundary.
+奥付以外の作品設定は、従来どおり共通設定で置き換える。
 
-Preserve these work-specific fields:
+奥付設定だけは全置換せず、作品の現在の奥付を基準にして、既存の`applyingPublisherInfo(from:)`を通じて共通の発行者情報をマージする。
+
+作品側から保持する項目は次のとおり。
 
 - `isEnabled`
 - `workTitle`
@@ -76,63 +79,65 @@ Preserve these work-specific fields:
 - `publicationDate`
 - `printerName`
 
-Apply these common publisher fields:
+共通側から適用する項目は次のとおり。
 
-- publisher, author, and circle names;
-- author and circle image data;
-- active circle-logo selection;
-- publisher, author, circle, website, and QR visibility flags;
-- website, X, pixiv, contact, and notes values.
+- 発行者名、作者名、サークル名
+- 作者画像、サークルロゴ画像
+- サークルロゴの使用設定
+- 発行者、作者、サークル、URL、QRコードの各表示設定
+- URL、X、pixiv、連絡先、その他
 
-The formatting decision is calculated from the resulting merged settings. The work body is formatted only when the resulting auto-format setting is enabled.
+フォーマットを実行するかどうかは、マージ後の作品設定から判定する。マージ後に自動フォーマットが有効な場合だけ本文をフォーマットする。
 
-### QR and URL layout
+### QRコードとURLの配置
 
-For horizontal colophon output:
+横書き奥付では次の規則で配置する。
 
-- keep the `HP` label at the existing label origin;
-- draw a visible URL from the same `valueX` used by all other values;
-- position the QR code so its horizontal center matches the visible URL layout's horizontal center;
-- when the URL is hidden and only the QR code is shown, center the QR code in the complete value column.
+- 「HP」ラベルは現在の位置を維持する。
+- URLを表示する場合は、他の奥付項目と同じ`valueX`から描画する。
+- QRコードの水平方向の中心を、表示されるURL領域の水平方向の中心と一致させる。
+- URLを非表示にしてQRコードだけを表示する場合は、値欄全体の中央へQRコードを配置する。
 
-The vertical colophon path already begins the URL at its shared `valueX` and centers the QR code from the URL width. Regression coverage will ensure it continues to follow the same rule.
+縦書き奥付の既存処理は、URLを共通の`valueX`から開始し、URL幅を基準にQRコードを中央配置している。回帰テストを追加し、この規則が維持されることを確認する。
 
-Extract the horizontal coordinate calculation into a small value-type layout helper so alignment can be tested without inspecting private Core Graphics drawing state.
+横書き用の座標計算は、小さな値型のレイアウトヘルパーへ分離する。これにより、非公開のCore Graphics描画状態を調べずに配置をテストできるようにする。
 
-## Error Handling
+## エラー処理
 
-- File-picker cancellation remains silent and preserves the previous logo.
-- A valid `viewBox` makes percentage root dimensions acceptable.
-- Invalid XML, a non-SVG root, or SVG content with no derivable positive finite size returns the existing specific SVG import error.
-- A WebKit snapshot or PNG validation failure returns the existing conversion error.
-- A failed replacement never clears the previous logo.
+- ファイル選択のキャンセルは警告を出さず、以前のロゴを保持する。
+- 有効な`viewBox`があれば、ルート寸法のパーセント指定を許可する。
+- 不正なXML、SVG以外のルート要素、正の有限サイズを決定できないSVGは、既存のSVG読込エラーにする。
+- WebKitのスナップショットまたはPNG検証に失敗した場合は、既存の変換エラーにする。
+- 新しい画像の読み込みに失敗しても、以前のロゴを削除しない。
 
-## Performance
+## 処理負荷
 
-SVG conversion runs once when the user uploads the file. The stored result remains PNG data consumed by the existing `UIImage` and PDF paths.
+SVG変換はアップロード時に1回だけ実行する。保存後は、既存の`UIImage`およびPDF描画処理がPNGデータを使用する。
 
-The UI and colophon-entry changes use an existing computed property and simple filtering. The common-settings merge is a value copy performed only when the user chooses to apply settings. The QR layout helper performs constant-time arithmetic. None of these changes adds pagination or preview regeneration work.
+設定画面と奥付項目の変更は、既存の算出プロパティと単純なフィルタリングだけを使用する。共通設定のマージは、利用者が「適用して開く」を選んだときだけ値をコピーする。QRコードのレイアウトヘルパーは定数時間の座標計算だけを行う。
 
-## Test Strategy
+これらの変更によって、ページ分割やプレビュー再生成の処理は追加しない。
 
-Use red-green TDD for each behavior:
+## テスト方針
 
-1. Add importer tests for percentage width and height with a valid `viewBox`, including square and wide aspect ratios.
-2. Add an importer test proving percentage-only dimensions without a `viewBox` remain invalid.
-3. Add presentation-copy coverage proving the monochrome recommendation is absent.
-4. Add colophon-entry tests proving an active logo omits author and circle entries while stored values remain unchanged, and that disabling the logo restores the entries.
-5. Change the common-settings review test to prove all common groups are applied while work-specific colophon fields remain intact.
-6. Add coordinate-helper tests proving the URL starts at `valueX`, the QR is centered over the visible URL, and QR-only output is centered in the value column.
-7. Run the supplied `logo.svg` and `title.svg` through the importer as local integration inputs.
-8. Run the complete XCTest suite and Debug, Staging, and Release builds.
-9. Build and reinstall the resulting Debug app on the connected device.
+各動作をレッド・グリーン方式のTDDで確認する。
 
-## Acceptance Criteria
+1. 有効な`viewBox`とパーセント指定の幅・高さを持つSVGのテストを追加し、正方形と横長の両方を確認する。
+2. `viewBox`がなく、パーセント寸法しか持たないSVGはエラーのままであることを確認する。
+3. 「ロゴはモノクロを推奨します。」が表示用コピーから削除されたことを確認する。
+4. 使用中のロゴが作者・サークル行を除外し、保存値を変更しないこと、およびロゴ無効化後に行が復元されることを確認する。
+5. 共通設定の全設定グループを適用しつつ、作品固有の奥付項目が保持されることを確認する。
+6. URLが`valueX`から始まること、QRコードが表示URLの中央に配置されること、QRコードだけの場合は値欄中央に配置されることを確認する。
+7. 提供された`logo.svg`と`title.svg`をローカルの実入力として読み込み、変換を確認する。
+8. XCTest全件とDebug、Staging、Releaseの各ビルドを実行する。
+9. 完成したDebug版を接続中の実機へビルドし、再インストールする。
 
-- Both supplied SVG files upload successfully and produce PNG data with the expected aspect ratio.
-- The monochrome recommendation is not visible.
-- An active circle logo hides author and circle controls and output rows without deleting their values.
-- Removing or disabling the logo restores the prior author and circle values and visibility choices.
-- Applying changed common settings cannot disable an already enabled work colophon or overwrite its publication date or printer information.
-- A visible URL starts at the shared value origin, and its QR code is centered over the URL.
-- No new SVG work occurs during preview or PDF generation.
+## 完了条件
+
+- 提供された2つのSVGを読み込めて、期待する縦横比のPNGデータを生成できる。
+- モノクロ推奨の文言が表示されない。
+- 使用中のサークルロゴが作者・サークルの設定項目と出力行を隠し、保存値を削除しない。
+- ロゴを無効化または削除すると、以前の作者・サークルの値と表示設定が復元される。
+- 共通設定を適用しても、有効な奥付が無効にならず、発行日と印刷所情報が上書きされない。
+- 表示するURLの左端が他の値と揃い、QRコードがURLの中央に配置される。
+- プレビューまたはPDF生成時に新しいSVG処理を実行しない。
