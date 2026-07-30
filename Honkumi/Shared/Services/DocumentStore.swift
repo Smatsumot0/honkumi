@@ -151,6 +151,10 @@ final class DocumentStore: ObservableObject {
         _ request: UserDefaultSettingsReviewRequest,
         decision: UserDefaultSettingsReviewDecision
     ) -> WorkSelectionResult {
+        if case let .apply(selection) = decision, selection.isEmpty {
+            return .unchanged
+        }
+
         guard request.revision == appData.userDefaultSettingsRevision,
               let work = appData.works.first(
                 where: { $0.id == request.workID }
@@ -169,14 +173,19 @@ final class DocumentStore: ObservableObject {
             }
 
             switch decision {
-            case .apply:
+            case let .apply(selection):
                 data.works[index].settings =
-                    data.userDefaultSettings.validated
+                    data.works[index].settings.applyingUserDefaults(
+                        data.userDefaultSettings,
+                        selection: selection
+                    )
                 data.works[index].updatedAt = Date()
                 result = WorkSelectionResult(
                     didSelect: true,
-                    shouldFormat: data.works[index]
-                        .settings.formatSettings.enableAutoFormat
+                    shouldFormat:
+                        selection.format
+                        && data.works[index]
+                            .settings.formatSettings.enableAutoFormat
                 )
             case .keepCurrent:
                 result = WorkSelectionResult(

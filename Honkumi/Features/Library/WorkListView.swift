@@ -110,7 +110,7 @@ struct WorkListView: View {
             )
         ) {
             Button("適用して開く") {
-                resolvePendingSettingsReview(.apply)
+                resolvePendingSettingsReview(.apply(.all))
             }
             Button("適用せず開く") {
                 resolvePendingSettingsReview(.keepCurrent)

@@ -11,8 +11,38 @@ nonisolated struct UserDefaultSettingsReviewRequest:
     }
 }
 
+nonisolated struct UserDefaultSettingsSelection: Equatable {
+    var editor: Bool
+    var circle: Bool
+    var format: Bool
+    var print: Bool
+
+    init(
+        editor: Bool = false,
+        circle: Bool = false,
+        format: Bool = false,
+        print: Bool = false
+    ) {
+        self.editor = editor
+        self.circle = circle
+        self.format = format
+        self.print = print
+    }
+
+    static let all = UserDefaultSettingsSelection(
+        editor: true,
+        circle: true,
+        format: true,
+        print: true
+    )
+
+    var isEmpty: Bool {
+        !editor && !circle && !format && !print
+    }
+}
+
 nonisolated enum UserDefaultSettingsReviewDecision: Equatable {
-    case apply
+    case apply(UserDefaultSettingsSelection)
     case keepCurrent
 }
 
