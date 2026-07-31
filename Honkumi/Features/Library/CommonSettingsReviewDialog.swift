@@ -89,15 +89,17 @@ struct CommonSettingsReviewDialog: View {
     var body: some View {
         ViewThatFits(in: .vertical) {
             dialogContent
+                .padding(20)
+                .fixedSize(horizontal: false, vertical: true)
 
             ScrollView(.vertical) {
                 dialogContent
             }
             .scrollBounceBehavior(.basedOnSize)
+            .padding(20)
+            .frame(maxHeight: maximumHeight)
         }
-        .padding(20)
         .frame(maxWidth: 360)
-        .frame(maxHeight: maximumHeight)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
         .shadow(radius: 24, y: 8)
         .accessibilityElement(children: .contain)
