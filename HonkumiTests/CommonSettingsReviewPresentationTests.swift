@@ -1,5 +1,7 @@
 @testable import Honkumi
 import PDFKit
+import SwiftUI
+import UIKit
 import XCTest
 
 final class CommonSettingsReviewPresentationTests: XCTestCase {
@@ -76,6 +78,51 @@ final class CommonSettingsReviewPresentationTests: XCTestCase {
                 minY: 140,
                 requiresScrolling: false
             )
+        )
+    }
+
+    @MainActor
+    func testTallContainerKeepsDialogAtIntrinsicHeight() {
+        let maximumHeight: CGFloat = 652
+        let controller = UIHostingController(
+            rootView: CommonSettingsReviewDialog(
+                selection: .constant(.all),
+                maximumHeight: maximumHeight,
+                onApply: {},
+                onKeepCurrent: {},
+                onCancel: {}
+            )
+        )
+
+        let measuredSize = controller.sizeThatFits(
+            in: CGSize(width: 390, height: 700)
+        )
+
+        XCTAssertGreaterThan(measuredSize.height, 300)
+        XCTAssertLessThan(measuredSize.height, maximumHeight - 100)
+    }
+
+    @MainActor
+    func testCompactContainerKeepsDialogWithinMaximumHeight() {
+        let maximumHeight: CGFloat = 232
+        let controller = UIHostingController(
+            rootView: CommonSettingsReviewDialog(
+                selection: .constant(.all),
+                maximumHeight: maximumHeight,
+                onApply: {},
+                onKeepCurrent: {},
+                onCancel: {}
+            )
+        )
+
+        let measuredSize = controller.sizeThatFits(
+            in: CGSize(width: 390, height: 280)
+        )
+
+        XCTAssertGreaterThan(measuredSize.height, 0)
+        XCTAssertLessThanOrEqual(
+            measuredSize.height,
+            maximumHeight + 0.5
         )
     }
 }
