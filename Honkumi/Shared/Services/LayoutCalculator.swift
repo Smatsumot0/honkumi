@@ -24,11 +24,6 @@ nonisolated enum LayoutCalculator {
         let bodyFrame = CGRect(x: bodyX, y: marginTop, width: bodyWidth, height: bodyHeight)
         let lineAdvance = bodyWidth / CGFloat(validatedSettings.linesPerPage)
         let characterAdvance = bodyHeight / CGFloat(validatedSettings.charactersPerLine)
-        let fontSize = validatedFontSize(
-            requestedFontSize: validatedSettings.fontSize,
-            lineAdvance: lineAdvance,
-            characterAdvance: characterAdvance
-        )
 
         return PageLayout(
             pageNumber: pageNumber,
@@ -42,21 +37,8 @@ nonisolated enum LayoutCalculator {
             marginOuter: marginOuter,
             lineAdvance: lineAdvance,
             characterAdvance: characterAdvance,
-            fontSize: fontSize,
+            fontSize: validatedSettings.fontSize,
             settings: validatedSettings
         )
-    }
-
-    private static func validatedFontSize(
-        requestedFontSize: CGFloat,
-        lineAdvance: CGFloat,
-        characterAdvance: CGFloat
-    ) -> CGFloat {
-        let minimumFontSize = EditorSettings.fontSizeRange.lowerBound
-        let smallestAdvance = min(lineAdvance, characterAdvance)
-        let largestNaturalFontSize = smallestAdvance / 0.72
-        let clampedNaturalFontSize = max(minimumFontSize, largestNaturalFontSize)
-
-        return min(requestedFontSize, clampedNaturalFontSize)
     }
 }
