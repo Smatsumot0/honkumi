@@ -110,9 +110,9 @@ final class ColophonCreatorVisibilityTests: XCTestCase {
             CircleLogoRenderPlacement.make(
                 imageSize: CGSize(width: 100, height: 100),
                 bodyFrame: CGRect(
-                    x: CGFloat.greatestFiniteMagnitude,
+                    x: CGFloat.greatestFiniteMagnitude * 0.75,
                     y: 0,
-                    width: 200,
+                    width: CGFloat.greatestFiniteMagnitude,
                     height: 300
                 ),
                 lineHeight: 20,
