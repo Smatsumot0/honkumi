@@ -176,9 +176,15 @@ nonisolated enum ManuscriptFormatter {
         let maxBlankLines = max(maxConsecutiveBlankLines, 0)
         var blankLineCount = 0
         var normalizedLines: [String] = []
+        let lines = text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
 
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+        for (index, line) in lines.enumerated() {
+            let isTrailingEditingLine = text.hasSuffix("\n") && index == lines.count - 1
+            if isTrailingEditingLine {
+                normalizedLines.append(line)
+            } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 blankLineCount += 1
                 if blankLineCount <= maxBlankLines {
                     normalizedLines.append(line)

@@ -75,6 +75,24 @@ final class ManuscriptLiveFormatterTests: XCTestCase {
         XCTAssertEqual(result.text, "前\n\n後\n遠い行  ")
     }
 
+    func testTrailingBlankLineAtLimitKeepsSecondNewlineAndCursorAtEnd() {
+        var settings = FormatSettings.default
+        settings.enableAutoFormat = true
+        settings.enableNormalizeBlankLines = true
+        settings.maxConsecutiveBlankLines = 1
+
+        let result = ManuscriptLiveFormatter.format(
+            "本文\n\n",
+            changedRange: NSRange(location: 3, length: 1),
+            selectedRange: NSRange(location: 4, length: 0),
+            settings: settings,
+            options: FormatOptions(isPremiumUser: false)
+        )
+
+        XCTAssertEqual(result.text, "本文\n\n")
+        XCTAssertEqual(result.selectedRange, NSRange(location: 4, length: 0))
+    }
+
     func testStructuralContextDoesNotApplyInlineRulesToBoundaryLines() {
         var settings = FormatSettings.default
         settings.enableAutoFormat = true
