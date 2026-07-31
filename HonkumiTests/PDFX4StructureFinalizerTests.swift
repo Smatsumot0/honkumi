@@ -55,6 +55,89 @@ final class PDFX4StructureFinalizerTests: XCTestCase {
         }
     }
 
+    func testFinalizationIgnoresReferenceLikeTextInStringsHexAndComments() throws {
+        let input = PDFTestFixtureBuilder.malformedQuartzStylePDF(
+            additionalCatalogEntries: " /Literal (nested (99 0 R) \\(99 0 R\\)) /Hex <393920302052>",
+            catalogPostamble: "\n% 99 0 R"
+        )
+
+        XCTAssertNoThrow(try PDFX4StructureFinalizer.finalizedData(from: input))
+    }
+
+    func testFinalizationSkipsReferenceLikeStreamPayloadWithDirectLength() throws {
+        let payload = "99 0 R (99 0 R) <393920302052> % 99 0 R"
+        let input = PDFTestFixtureBuilder.pdfWithStream(
+            lengthEntries: "/Length \(payload.utf8.count)",
+            payload: payload
+        )
+
+        XCTAssertNoThrow(try PDFX4StructureFinalizer.finalizedData(from: input))
+    }
+
+    func testFinalizationSkipsReferenceLikeStreamPayloadWithIndirectLength() throws {
+        let payload = "99 0 R"
+        let input = PDFTestFixtureBuilder.pdfWithStream(
+            lengthEntries: "/Length 5 0 R",
+            payload: payload,
+            additionalObjects: ["\(payload.utf8.count)"]
+        )
+
+        XCTAssertNoThrow(try PDFX4StructureFinalizer.finalizedData(from: input))
+    }
+
+    func testFinalizationRejectsMissingAndNonIntegerIndirectStreamLengths() {
+        let cases: [(Data, PDFX4FinalizationError)] = [
+            (
+                PDFTestFixtureBuilder.pdfWithStream(
+                    lengthEntries: "/Length 99 0 R",
+                    payload: "payload"
+                ),
+                .missingReference(.init(number: 99, generation: 0))
+            ),
+            (
+                PDFTestFixtureBuilder.pdfWithStream(
+                    lengthEntries: "/Length 5 0 R",
+                    payload: "payload",
+                    additionalObjects: ["(not an integer)"]
+                ),
+                .malformedXRef
+            )
+        ]
+
+        for (input, expectedError) in cases {
+            XCTAssertThrowsError(try PDFX4StructureFinalizer.finalizedData(from: input)) { error in
+                XCTAssertEqual(error as? PDFX4FinalizationError, expectedError)
+            }
+        }
+    }
+
+    func testFinalizationRejectsMissingMismatchedAndDuplicateStreamLengths() {
+        let cases: [Data] = [
+            PDFTestFixtureBuilder.pdfWithStream(lengthEntries: "", payload: "payload"),
+            PDFTestFixtureBuilder.pdfWithStream(lengthEntries: "/Length 2", payload: "payload"),
+            PDFTestFixtureBuilder.pdfWithStream(lengthEntries: "/Length 7 /Length 7", payload: "payload")
+        ]
+
+        for input in cases {
+            XCTAssertThrowsError(try PDFX4StructureFinalizer.finalizedData(from: input)) { error in
+                XCTAssertEqual(error as? PDFX4FinalizationError, .malformedXRef)
+            }
+        }
+    }
+
+    func testFinalizationRejectsIndirectReferenceInTrailerID() {
+        let input = PDFTestFixtureBuilder.malformedQuartzStylePDF(
+            additionalTrailerEntries: " /ID [99 0 R]"
+        )
+
+        XCTAssertThrowsError(try PDFX4StructureFinalizer.finalizedData(from: input)) { error in
+            XCTAssertEqual(
+                error as? PDFX4FinalizationError,
+                .missingReference(.init(number: 99, generation: 0))
+            )
+        }
+    }
+
     func testFinalizationPreservesEscapedNonForbiddenTrailerName() throws {
         let output = try PDFX4StructureFinalizer.finalizedData(
             from: PDFTestFixtureBuilder.malformedQuartzStylePDF(

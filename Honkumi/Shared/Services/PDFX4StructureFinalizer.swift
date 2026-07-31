@@ -194,6 +194,15 @@ nonisolated private struct PDFLexicalScanner {
                 )
             )
         }
+        if let rawIDValue = snapshot.rawIDValue {
+            references.append(
+                contentsOf: try scan(
+                    rawIDValue,
+                    integerObjects: integerObjects,
+                    objectReferences: objectReferences
+                )
+            )
+        }
 
         for reference in references where snapshot.objectBodies[reference] == nil {
             throw PDFX4FinalizationError.missingReference(reference)
@@ -309,6 +318,7 @@ nonisolated private struct PDFLexicalScanner {
             guard let name = readName() else { throw PDFX4FinalizationError.malformedXRef }
             let value = try consumeValue()
             if name == "Length" {
+                guard streamLength == nil else { throw PDFX4FinalizationError.malformedXRef }
                 switch value {
                 case let .integer(length) where length >= 0:
                     streamLength = .direct(length)
@@ -360,6 +370,9 @@ nonisolated private struct PDFLexicalScanner {
             throw PDFX4FinalizationError.malformedXRef
         }
         position += payloadLength
+        guard consumeLineEnding(), consumeKeyword("endstream") else {
+            throw PDFX4FinalizationError.malformedXRef
+        }
     }
 
     private mutating func consumeLiteralString() throws {
@@ -443,6 +456,31 @@ nonisolated private struct PDFLexicalScanner {
         }
         position += bytes.count
         return true
+    }
+
+    private mutating func consumeKeyword(_ keyword: String) -> Bool {
+        let bytes = Array(keyword.utf8)
+        guard position + bytes.count <= data.count,
+              data[position..<(position + bytes.count)].elementsEqual(bytes),
+              position + bytes.count == data.count || PDFByteCursor.isDelimiter(data[position + bytes.count]) else {
+            return false
+        }
+        position += bytes.count
+        return true
+    }
+
+    private mutating func consumeLineEnding() -> Bool {
+        guard position < data.count else { return false }
+        if data[position] == 13 {
+            position += 1
+            if position < data.count, data[position] == 10 { position += 1 }
+            return true
+        }
+        if data[position] == 10 {
+            position += 1
+            return true
+        }
+        return false
     }
 
     private mutating func skipWhitespaceAndComments() {

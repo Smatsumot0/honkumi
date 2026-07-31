@@ -38,10 +38,50 @@ enum PDFTestFixtureBuilder {
         )
     }
 
+    static func pdfWithStream(
+        lengthEntries: String,
+        payload: String,
+        additionalObjects: [String] = []
+    ) -> Data {
+        var data = Data("%PDF-1.3\n".utf8)
+        var offsets: [Int: Int] = [:]
+
+        func appendObject(_ number: Int, _ body: String) {
+            offsets[number] = data.count
+            data.append(Data("\(number) 0 obj\n\(body)\nendobj\n".utf8))
+        }
+
+        appendObject(1, "<< /Type /Catalog /Pages 2 0 R >>")
+        appendObject(2, "<< /Type /Pages /Count 0 /Kids [] >>")
+        appendObject(3, "<< /Title (Fixture) >>")
+        appendObject(4, "<< \(lengthEntries) >>\nstream\n\(payload)\nendstream")
+        for (index, object) in additionalObjects.enumerated() {
+            appendObject(index + 5, object)
+        }
+
+        let xrefOffset = data.count
+        let size = additionalObjects.count + 5
+        data.append(Data("xref\n0 \(size)\n".utf8))
+        data.append(Data("0000000000 65535 f \n".utf8))
+        for number in 1..<size {
+            data.append(Data(String(format: "%010d 00000 n \n", offsets[number]!).utf8))
+        }
+        data.append(Data("""
+        trailer
+        << /Size \(size) /Root 1 0 R /Info 3 0 R >>
+        startxref
+        \(xrefOffset)
+        %%EOF
+        """.utf8))
+        return data
+    }
+
     static func malformedQuartzStylePDF(
         trappedValue: String? = nil,
         additionalTrailerEntries: String = "",
-        catalogReference: String? = nil
+        catalogReference: String? = nil,
+        additionalCatalogEntries: String = "",
+        catalogPostamble: String = ""
     ) -> Data {
         var data = Data("%PDF-1.3\n".utf8)
         var offsets: [Int: Int] = [:]
@@ -52,7 +92,10 @@ enum PDFTestFixtureBuilder {
         }
 
         let brokenReference = catalogReference.map { " /Broken \($0)" } ?? ""
-        appendObject(1, "<< /Type /Catalog /Pages 2 0 R\(brokenReference) >>")
+        appendObject(
+            1,
+            "<< /Type /Catalog /Pages 2 0 R\(brokenReference)\(additionalCatalogEntries) >>\(catalogPostamble)"
+        )
         appendObject(2, "<< /Type /Pages /Count 0 /Kids [] >>")
         let trapped = trappedValue.map { " /Trapped \($0)" } ?? ""
         appendObject(3, "<< /Title (Fixture)\(trapped) >>")
