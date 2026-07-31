@@ -1283,8 +1283,6 @@ nonisolated struct BodyPDFExportService {
                       drawHorizontalCircleLogoCreator(
                         colophon,
                         y: cursorY,
-                        lineHeight: lineHeight,
-                        valueAttributes: valueAttributes,
                         in: layout
                       ) {
             } else if entry.label.isEmpty {
@@ -1412,9 +1410,6 @@ nonisolated struct BodyPDFExportService {
             return max(
                 lineHeight,
                 creatorImageBlockHeight(
-                    colophon,
-                    lineHeight: lineHeight,
-                    isAdditionalFontPackUnlocked: true,
                     in: layout
                 )
             )
@@ -1911,8 +1906,6 @@ nonisolated struct BodyPDFExportService {
     private func drawHorizontalCircleLogoCreator(
         _ colophon: ColophonSettings,
         y: CGFloat,
-        lineHeight: CGFloat,
-        valueAttributes: [NSAttributedString.Key: Any],
         in layout: PageLayout
     ) -> Bool {
         guard let data = colophon.circleImageData,
@@ -1924,22 +1917,6 @@ nonisolated struct BodyPDFExportService {
         let imageSize = CGSize(width: min(height * aspect, maxImageWidth), height: height)
         let x = layout.bodyFrame.midX - imageSize.width / 2
         drawHighQualityImage(image, in: CGRect(x: x, y: y, width: imageSize.width, height: imageSize.height))
-
-        let authorName = colophon.showsAuthorName
-            ? colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
-            : ""
-        if !authorName.isEmpty {
-            drawCenteredFittedHorizontalColophonValue(
-                authorName,
-                x: layout.bodyFrame.minX,
-                y: y + height + 4,
-                maxWidth: layout.bodyFrame.width,
-                baseLineHeight: lineHeight,
-                baseAttributes: valueAttributes,
-                isAdditionalFontPackUnlocked: true,
-                in: layout
-            )
-        }
 
         return true
     }
@@ -1956,24 +1933,8 @@ nonisolated struct BodyPDFExportService {
         context.restoreGState()
     }
 
-    private func creatorImageBlockHeight(
-        _ colophon: ColophonSettings,
-        lineHeight: CGFloat,
-        isAdditionalFontPackUnlocked: Bool,
-        in layout: PageLayout
-    ) -> CGFloat {
-        let hasAuthorName = colophon.showsAuthorName
-            && !colophon.authorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let authorHeight = hasAuthorName
-            ? fittedHorizontalColophonValueLayout(
-                colophon.authorName,
-                maxWidth: layout.bodyFrame.width,
-                baseLineHeight: lineHeight,
-                isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
-                in: layout
-            ).height
-            : 0
-        return creatorImageHeight(in: layout) + (hasAuthorName ? 4 + authorHeight : 0)
+    private func creatorImageBlockHeight(in layout: PageLayout) -> CGFloat {
+        creatorImageHeight(in: layout)
     }
 
     private func creatorImageHeight(in layout: PageLayout) -> CGFloat {

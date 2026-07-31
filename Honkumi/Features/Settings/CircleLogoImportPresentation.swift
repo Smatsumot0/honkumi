@@ -5,8 +5,6 @@ nonisolated enum CircleLogoImportCopy {
     static let sourceTitle = "サークルロゴの選択方法"
     static let sourceMessage = "アップロード元を選択してください。"
     static let uploadButton = "アップロード"
-    static let monochromeRecommendation =
-        "ロゴはモノクロを推奨します。"
     static let photoSource = "写真から選択"
     static let fileSource = "ファイルから選択"
     static let cancel = "キャンセル"

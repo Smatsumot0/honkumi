@@ -430,7 +430,13 @@ nonisolated enum ManuscriptPaginator {
         entries.insert(contentsOf: activeWorkEntries, at: 4)
 
         return entries.filter { entry in
-            if entry.id == "creator" { return colophon.hasCreatorImage }
+            if entry.id == "creator" {
+                return colophon.hasCreatorImage
+            }
+            if colophon.hasCreatorImage,
+               entry.id == "author" || entry.id == "circle" {
+                return false
+            }
 
             return !entry.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }

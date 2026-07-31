@@ -25,10 +25,6 @@ final class CircleLogoImportPresentationTests: XCTestCase {
 
     func testApprovedCircleLogoCopy() {
         XCTAssertEqual(CircleLogoImportCopy.uploadButton, "アップロード")
-        XCTAssertEqual(
-            CircleLogoImportCopy.monochromeRecommendation,
-            "ロゴはモノクロを推奨します。"
-        )
         XCTAssertEqual(CircleLogoImportCopy.photoSource, "写真から選択")
         XCTAssertEqual(CircleLogoImportCopy.fileSource, "ファイルから選択")
         XCTAssertEqual(CircleLogoImportCopy.cancel, "キャンセル")

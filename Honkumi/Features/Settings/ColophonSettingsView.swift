@@ -112,15 +112,18 @@ struct ColophonSettingsView: View {
 
     private var colophonIdentityFields: some View {
         Group {
-            Toggle("作者名を表示", isOn: colophonBinding(\.showsAuthorName))
-            if viewModel.settings.colophon.showsAuthorName {
-                TextField("作者名", text: colophonBinding(\.authorName))
+            if !viewModel.settings.colophon.hasCreatorImage {
+                Toggle("作者名を表示", isOn: colophonBinding(\.showsAuthorName))
+                if viewModel.settings.colophon.showsAuthorName {
+                    TextField("作者名", text: colophonBinding(\.authorName))
+                }
+
+                Toggle("サークル名を表示", isOn: colophonBinding(\.showsCircleName))
+                if viewModel.settings.colophon.showsCircleName {
+                    TextField("サークル名", text: colophonBinding(\.circleName))
+                }
             }
 
-            Toggle("サークル名を表示", isOn: colophonBinding(\.showsCircleName))
-            if viewModel.settings.colophon.showsCircleName {
-                TextField("サークル名", text: colophonBinding(\.circleName))
-            }
             circleLogoControls
 
             Toggle("URLを表示", isOn: colophonBinding(\.showsWebsiteURL))
@@ -172,21 +175,15 @@ struct ColophonSettingsView: View {
             HStack {
                 imagePreview(data: imageData)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Button {
-                        circleLogoImportPresentation.present(.sourceChooser)
-                    } label: {
-                        Label(
-                            CircleLogoImportCopy.uploadButton,
-                            systemImage: "photo.on.rectangle"
-                        )
-                    }
-                    .accessibilityIdentifier("colophon.circleLogo.select")
-
-                    Text(CircleLogoImportCopy.monochromeRecommendation)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                Button {
+                    circleLogoImportPresentation.present(.sourceChooser)
+                } label: {
+                    Label(
+                        CircleLogoImportCopy.uploadButton,
+                        systemImage: "photo.on.rectangle"
+                    )
                 }
+                .accessibilityIdentifier("colophon.circleLogo.select")
 
                 Spacer()
 
