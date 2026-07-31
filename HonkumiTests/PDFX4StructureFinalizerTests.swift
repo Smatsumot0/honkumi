@@ -145,9 +145,14 @@ final class PDFX4StructureFinalizerTests: XCTestCase {
             )
         )
         let structure = try PDFX4StructureFinalizer.structure(in: output)
+        let trailer = Data(output[structure.xrefOffset...])
 
-        XCTAssertTrue(output[structure.xrefOffset...].contains(Data("/Custom#2FKey /Value".utf8)))
-        XCTAssertFalse(output[structure.xrefOffset...].contains(Data("/Custom/Key /Value".utf8)))
+        XCTAssertEqual(
+            PDFX4TestInspector.occurrenceCount(of: Data("/Custom#2FKey".utf8), in: trailer),
+            1
+        )
+        XCTAssertEqual(
+            PDFX4TestInspector.occurrenceCount(of: Data("/Custom/Key".utf8), in: trailer), 0)
     }
 
     func testFinalizationRejectsEscapedForbiddenTrailerNames() {
