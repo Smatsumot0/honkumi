@@ -69,6 +69,16 @@ nonisolated enum PDFX4FinalizationError: Error, Equatable {
     case unreadableFinalizedPDF
 }
 
+nonisolated protocol PDFFileFinalizing: Sendable {
+    func finalize(at url: URL) throws
+}
+
+nonisolated struct PDFX4FileFinalizer: PDFFileFinalizing {
+    func finalize(at url: URL) throws {
+        try PDFX4StructureFinalizer.finalize(at: url)
+    }
+}
+
 nonisolated enum PDFX4StructureFinalizer {
     static func structure(
         in data: Data,
@@ -79,6 +89,10 @@ nonisolated enum PDFX4StructureFinalizer {
         )
     }
 
+    static func validateReferences(in snapshot: PDFX4StructureSnapshot) throws {
+        try PDFLexicalScanner.validateReferences(in: snapshot)
+    }
+
     static func finalizedData(from source: Data) throws -> Data {
         let parsed = try structure(in: source, allowRepairableZeroOffsets: true)
         try PDFLexicalScanner.validateReferences(in: parsed)
@@ -87,7 +101,11 @@ nonisolated enum PDFX4StructureFinalizer {
         }
         let infoBody = try PDFInfoDictionaryNormalizer.trappedFalse(in: originalInfoBody)
 
-        var output = try PDFSerialization.header(version: "1.6", source: source, parsed: parsed)
+        var output = try PDFSerialization.header(
+            version: PDFPrintProduction.targetPDFVersion,
+            source: source,
+            parsed: parsed
+        )
         var newOffsets: [PDFObjectReference: Int] = [:]
 
         for object in parsed.objectBodies.keys.sorted(by: parsed.originalOffsetOrder) {
