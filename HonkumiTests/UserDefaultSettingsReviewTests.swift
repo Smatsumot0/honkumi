@@ -27,7 +27,7 @@ final class UserDefaultSettingsReviewTests: XCTestCase {
         let store = makeStore(commonRevision: 3, reviewedRevision: 1)
         let before = store.document.settings
         var defaults = store.userDefaultSettings
-        defaults.editorFontId = "NotoSansJP-Regular"
+        defaults.editorFontId = "biz-ud-gothic"
         defaults.editorFontSize = 18
         defaults.pageSize = .b6
         defaults.formatSettings.enableAutoFormat = true
@@ -44,7 +44,7 @@ final class UserDefaultSettingsReviewTests: XCTestCase {
 
         XCTAssertTrue(result.didSelect)
         XCTAssertFalse(result.shouldFormat)
-        XCTAssertEqual(store.document.settings.editorFontId, "NotoSansJP-Regular")
+        XCTAssertEqual(store.document.settings.editorFontId, "biz-ud-gothic")
         XCTAssertEqual(store.document.settings.editorFontSize, 18)
         XCTAssertEqual(store.document.settings.pageSize, before.pageSize)
         XCTAssertEqual(store.document.settings.formatSettings, before.formatSettings)
