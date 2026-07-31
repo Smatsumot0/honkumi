@@ -1,6 +1,12 @@
 import CoreGraphics
 import Foundation
+import PDFKit
 @testable import Honkumi
+import XCTest
+
+nonisolated struct PassthroughPDFFinalizer: PDFFileFinalizing {
+    func finalize(at url: URL) throws {}
+}
 
 enum PDFTestFixtureBuilder {
     static func pdfWithCatalogReference(_ reference: String) -> Data {
@@ -1200,5 +1206,168 @@ private final class PDFXMPTestParserDelegate: NSObject, XMLParserDelegate {
             isCapturingDefaultTitle = false
         }
         _ = elementStack.popLast()
+    }
+}
+
+struct PDFPageRegressionSnapshot: Equatable {
+    let mediaBox: CGRect
+    let trimBox: CGRect
+    let bleedBox: CGRect
+    let cropBox: CGRect
+    let decodedContentData: Data
+    let extractedText: String
+    let rgbaPixels: Data
+}
+
+enum PDFPageRegressionInspector {
+    static func snapshots(
+        from data: Data,
+        scale: CGFloat = 2
+    ) throws -> [PDFPageRegressionSnapshot] {
+        guard
+            let provider = CGDataProvider(data: data as CFData),
+            let coreGraphicsDocument = CGPDFDocument(provider),
+            let pdfKitDocument = PDFDocument(data: data),
+            coreGraphicsDocument.numberOfPages == pdfKitDocument.pageCount
+        else {
+            throw PDFX4TestInspectionError.unreadablePDF
+        }
+
+        return try (1...coreGraphicsDocument.numberOfPages).map { pageNumber in
+            guard
+                let coreGraphicsPage = coreGraphicsDocument.page(at: pageNumber),
+                let pageDictionary = coreGraphicsPage.dictionary,
+                let pdfKitPage = pdfKitDocument.page(at: pageNumber - 1)
+            else {
+                throw PDFX4TestInspectionError.unreadablePDF
+            }
+
+            return PDFPageRegressionSnapshot(
+                mediaBox: coreGraphicsPage.getBoxRect(.mediaBox),
+                trimBox: coreGraphicsPage.getBoxRect(.trimBox),
+                bleedBox: coreGraphicsPage.getBoxRect(.bleedBox),
+                cropBox: coreGraphicsPage.getBoxRect(.cropBox),
+                decodedContentData: try PDFX4TestInspector.regressionContentData(
+                    in: pageDictionary
+                ),
+                extractedText: pdfKitPage.string ?? "",
+                rgbaPixels: try renderedRGBABytes(
+                    for: coreGraphicsPage,
+                    scale: scale
+                )
+            )
+        }
+    }
+
+    private static func renderedRGBABytes(
+        for page: CGPDFPage,
+        scale: CGFloat
+    ) throws -> Data {
+        let mediaBox = page.getBoxRect(.mediaBox)
+        let scaledWidth = ceil(mediaBox.width * scale)
+        let scaledHeight = ceil(mediaBox.height * scale)
+        guard
+            scale.isFinite,
+            scale > 0,
+            scaledWidth.isFinite,
+            scaledHeight.isFinite,
+            scaledWidth > 0,
+            scaledHeight > 0,
+            scaledWidth <= CGFloat(Int.max / 4),
+            scaledHeight <= CGFloat(Int.max)
+        else {
+            throw PDFX4TestInspectionError.unreadablePDF
+        }
+
+        let width = Int(scaledWidth)
+        let height = Int(scaledHeight)
+        let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: 4)
+        let (byteCount, countOverflow) = bytesPerRow.multipliedReportingOverflow(by: height)
+        guard !rowOverflow, !countOverflow else {
+            throw PDFX4TestInspectionError.unreadablePDF
+        }
+
+        var pixels = Data(count: byteCount)
+        try pixels.withUnsafeMutableBytes { buffer in
+            let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue
+                | CGImageAlphaInfo.premultipliedLast.rawValue
+            guard
+                let baseAddress = buffer.baseAddress,
+                let context = CGContext(
+                    data: baseAddress,
+                    width: width,
+                    height: height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bytesPerRow,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: bitmapInfo
+                )
+            else {
+                throw PDFX4TestInspectionError.unreadablePDF
+            }
+
+            context.setBlendMode(.copy)
+            context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            context.setBlendMode(.normal)
+            context.scaleBy(x: scale, y: scale)
+            context.translateBy(x: -mediaBox.minX, y: -mediaBox.minY)
+            context.drawPDFPage(page)
+            context.flush()
+        }
+        return pixels
+    }
+}
+
+extension PDFX4TestInspector {
+    static func assertNonInfoObjectBodiesEqual(
+        before: Data,
+        after: Data,
+        context: String = "",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let beforeStructure = try PDFX4StructureFinalizer.structure(
+            in: before,
+            allowRepairableZeroOffsets: true
+        )
+        let afterStructure = try PDFX4StructureFinalizer.structure(in: after)
+        var beforeBodies = beforeStructure.objectBodies
+        var afterBodies = afterStructure.objectBodies
+        beforeBodies.removeValue(forKey: beforeStructure.infoReference)
+        afterBodies.removeValue(forKey: afterStructure.infoReference)
+
+        let beforeReferences = Set(beforeBodies.keys)
+        let afterReferences = Set(afterBodies.keys)
+        XCTAssertEqual(beforeReferences, afterReferences, context, file: file, line: line)
+
+        let references = beforeReferences.union(afterReferences).sorted {
+            if $0.number == $1.number {
+                return $0.generation < $1.generation
+            }
+            return $0.number < $1.number
+        }
+        for reference in references {
+            XCTAssertEqual(
+                beforeBodies[reference],
+                afterBodies[reference],
+                "\(context) object \(reference.number) \(reference.generation)",
+                file: file,
+                line: line
+            )
+        }
+    }
+
+    fileprivate static func regressionContentData(
+        in pageDictionary: CGPDFDictionaryRef
+    ) throws -> Data {
+        var result = Data()
+        for contentStream in contentStreams(in: pageDictionary, key: "Contents") {
+            let decoded = try decodedData(from: contentStream, label: "Contents")
+            var length = UInt64(decoded.count).bigEndian
+            Swift.withUnsafeBytes(of: &length) { result.append(contentsOf: $0) }
+            result.append(decoded)
+        }
+        return result
     }
 }
