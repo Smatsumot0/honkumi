@@ -423,7 +423,7 @@ nonisolated enum RecommendedPrintSettings {
                 marginOuterMm: 10
             ),
             .over240: RecommendedLayoutSetting(
-                charactersPerLine: 42,
+                charactersPerLine: 45,
                 linesPerPage: 18,
                 fontSizePt: 8.5,
                 marginTopMm: 18,

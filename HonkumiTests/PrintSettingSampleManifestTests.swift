@@ -37,6 +37,34 @@ final class PrintSettingSampleManifestTests: XCTestCase {
         }
     }
 
+    func testShinshoOver240Uses45CharactersInDisplayAndRenderPipelines() throws {
+        let sample = try XCTUnwrap(
+            PrintSettingSampleManifest.recommendedSettingCases().first {
+                $0.document.settings.pageSize == .shinsho
+                    && $0.requestedPageCount == 241
+            }
+        )
+
+        let displaySnapshot = PrintSettingsDisplaySnapshot.calculate(
+            body: sample.document.body,
+            settings: sample.document.settings
+        )
+        let preparedDocument = ManuscriptRenderPipeline.preparedDocument(
+            from: sample.document,
+            subscriptionStatus: .free
+        )
+
+        for effective in [displaySnapshot.settings, preparedDocument.settings] {
+            XCTAssertEqual(effective.fontSize, 8.5, accuracy: 0.001)
+            XCTAssertEqual(effective.charactersPerLine, 45)
+            XCTAssertEqual(effective.linesPerPage, 14)
+            XCTAssertEqual(effective.marginTop, 18, accuracy: 0.001)
+            XCTAssertEqual(effective.marginBottom, 17, accuracy: 0.001)
+            XCTAssertEqual(effective.marginOuter, 10, accuracy: 0.001)
+            XCTAssertEqual(effective.marginInner, 26, accuracy: 0.001)
+        }
+    }
+
     func testFontSizeManifestContainsEveryHalfPoint() {
         let samples = PrintSettingSampleManifest.fontSizeCases()
         let sizes = samples.map(\.document.settings.fontSize)
