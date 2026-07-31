@@ -1,9 +1,47 @@
 import Foundation
+@testable import Honkumi
 
 enum PDFTestFixtureBuilder {
+    static func pdfWithCatalogReference(_ reference: String) -> Data {
+        malformedQuartzStylePDF(catalogReference: reference)
+    }
+
+    static func incorrectPositiveOffsetPDF() -> Data {
+        replacingFirst(
+            malformedQuartzStylePDF(),
+            "0000000009 00000 n ",
+            with: "0000000010 00000 n "
+        )
+    }
+
+    static func duplicateXRefObjectNumberPDF() -> Data {
+        replacingFirst(
+            malformedQuartzStylePDF(),
+            "0000000000 00000 n \ntrailer",
+            with: "0000000000 00000 n \n1 1\n0000000009 00000 n \ntrailer"
+        )
+    }
+
+    static func incrementalUpdatePDF() -> Data {
+        replacingFirst(
+            malformedQuartzStylePDF(),
+            " /Info 3 0 R >>",
+            with: " /Info 3 0 R /Prev 0 >>"
+        )
+    }
+
+    static func encryptedPDF() -> Data {
+        replacingFirst(
+            malformedQuartzStylePDF(),
+            " /Info 3 0 R >>",
+            with: " /Info 3 0 R /Encrypt 4 0 R >>"
+        )
+    }
+
     static func malformedQuartzStylePDF(
         trappedValue: String? = nil,
-        additionalTrailerEntries: String = ""
+        additionalTrailerEntries: String = "",
+        catalogReference: String? = nil
     ) -> Data {
         var data = Data("%PDF-1.3\n".utf8)
         var offsets: [Int: Int] = [:]
@@ -13,7 +51,8 @@ enum PDFTestFixtureBuilder {
             data.append(Data("\(number) 0 obj\n\(body)\nendobj\n".utf8))
         }
 
-        appendObject(1, "<< /Type /Catalog /Pages 2 0 R >>")
+        let brokenReference = catalogReference.map { " /Broken \($0)" } ?? ""
+        appendObject(1, "<< /Type /Catalog /Pages 2 0 R\(brokenReference) >>")
         appendObject(2, "<< /Type /Pages /Count 0 /Kids [] >>")
         let trapped = trappedValue.map { " /Trapped \($0)" } ?? ""
         appendObject(3, "<< /Title (Fixture)\(trapped) >>")
@@ -44,5 +83,28 @@ enum PDFTestFixtureBuilder {
         result.append(Data(new.utf8))
         result.append(source[range.upperBound..<source.count])
         return result
+    }
+}
+
+enum PDFX4TestInspector {
+    static func infoObjectBody(in data: Data) throws -> Data {
+        let structure = try PDFX4StructureFinalizer.structure(in: data)
+        guard let body = structure.objectBodies[structure.infoReference] else {
+            throw PDFX4FinalizationError.missingReference(structure.infoReference)
+        }
+        return body
+    }
+
+    static func occurrenceCount(of needle: Data, in haystack: Data) -> Int {
+        guard !needle.isEmpty else { return 0 }
+
+        var count = 0
+        var lowerBound = haystack.startIndex
+        while lowerBound < haystack.endIndex,
+              let range = haystack.range(of: needle, in: lowerBound..<haystack.endIndex) {
+            count += 1
+            lowerBound = range.upperBound
+        }
+        return count
     }
 }

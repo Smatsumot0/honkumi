@@ -3,6 +3,58 @@ import Foundation
 import XCTest
 
 final class PDFX4StructureFinalizerTests: XCTestCase {
+    func testFinalizationRejectsMissingIndirectReference() {
+        let input = PDFTestFixtureBuilder.pdfWithCatalogReference("99 0 R")
+
+        XCTAssertThrowsError(try PDFX4StructureFinalizer.finalizedData(from: input)) {
+            XCTAssertEqual(
+                $0 as? PDFX4FinalizationError,
+                .missingReference(.init(number: 99, generation: 0))
+            )
+        }
+    }
+
+    func testFinalizationNormalizesExistingStringTrappedValue() throws {
+        let input = PDFTestFixtureBuilder.malformedQuartzStylePDF(trappedValue: "(False)")
+        let output = try PDFX4StructureFinalizer.finalizedData(from: input)
+        let info = try PDFX4TestInspector.infoObjectBody(in: output)
+
+        XCTAssertEqual(
+            PDFX4TestInspector.occurrenceCount(of: Data("/Trapped /False".utf8), in: info),
+            1
+        )
+        XCTAssertFalse(info.contains(Data("/Trapped (False)".utf8)))
+    }
+
+    func testFileFinalizationLeavesOriginalBytesWhenValidationFails() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("pdf")
+        let malformed = Data("%PDF-1.3\\nnot a pdf".utf8)
+        try malformed.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertThrowsError(try PDFX4StructureFinalizer.finalize(at: url))
+        XCTAssertEqual(try Data(contentsOf: url), malformed)
+    }
+
+    func testStructureRejectsMalformedFixtureVariants() {
+        let cases: [(Data, PDFX4FinalizationError)] = [
+            (PDFTestFixtureBuilder.incorrectPositiveOffsetPDF(), .objectHeaderMismatch(1)),
+            (PDFTestFixtureBuilder.duplicateXRefObjectNumberPDF(), .duplicateObjectNumber(1)),
+            (PDFTestFixtureBuilder.incrementalUpdatePDF(), .unsupportedIncrementalUpdate),
+            (PDFTestFixtureBuilder.encryptedPDF(), .encryptedPDF)
+        ]
+
+        for (input, expectedError) in cases {
+            XCTAssertThrowsError(
+                try PDFX4StructureFinalizer.structure(in: input, allowRepairableZeroOffsets: true)
+            ) { error in
+                XCTAssertEqual(error as? PDFX4FinalizationError, expectedError)
+            }
+        }
+    }
+
     func testFinalizationPreservesEscapedNonForbiddenTrailerName() throws {
         let output = try PDFX4StructureFinalizer.finalizedData(
             from: PDFTestFixtureBuilder.malformedQuartzStylePDF(

@@ -81,6 +81,7 @@ nonisolated enum PDFX4StructureFinalizer {
 
     static func finalizedData(from source: Data) throws -> Data {
         let parsed = try structure(in: source, allowRepairableZeroOffsets: true)
+        try PDFLexicalScanner.validateReferences(in: parsed)
         guard let originalInfoBody = parsed.objectBodies[parsed.infoReference] else {
             throw PDFX4FinalizationError.missingReference(parsed.infoReference)
         }
@@ -122,11 +123,340 @@ nonisolated enum PDFX4StructureFinalizer {
         ))
 
         do {
-            _ = try structure(in: output)
+            let rebuilt = try structure(in: output)
+            try PDFLexicalScanner.validateReferences(in: rebuilt)
         } catch {
             throw PDFX4FinalizationError.unreadableFinalizedPDF
         }
         return output
+    }
+
+    static func finalize(at url: URL) throws {
+        let source = try Data(contentsOf: url)
+        let output = try finalizedData(from: source)
+
+        guard
+            let provider = CGDataProvider(data: output as CFData),
+            CGPDFDocument(provider) != nil
+        else {
+            throw PDFX4FinalizationError.unreadableFinalizedPDF
+        }
+
+        try output.write(to: url, options: .atomic)
+    }
+}
+
+nonisolated private struct PDFLexicalScanner {
+    private enum Value {
+        case integer(Int)
+        case reference(PDFObjectReference)
+        case dictionary(StreamLength?)
+        case other
+    }
+
+    private enum StreamLength {
+        case direct(Int)
+        case indirect(PDFObjectReference)
+    }
+
+    private let data: Data
+    private let integerObjects: [PDFObjectReference: Int]
+    private let objectReferences: Set<PDFObjectReference>
+    private var position = 0
+    private var references: [PDFObjectReference] = []
+
+    static func validateReferences(in snapshot: PDFX4StructureSnapshot) throws {
+        let integerObjects = snapshot.objectBodies.reduce(into: [PDFObjectReference: Int]()) {
+            values,
+            element in
+            if let value = directIntegerObjectValue(in: element.value) {
+                values[element.key] = value
+            }
+        }
+        let objectReferences = Set(snapshot.objectBodies.keys)
+
+        var references: [PDFObjectReference] = []
+        for objectBody in snapshot.objectBodies.values {
+            references.append(
+                contentsOf: try scan(
+                    objectBody,
+                    integerObjects: integerObjects,
+                    objectReferences: objectReferences
+                )
+            )
+        }
+        for entry in snapshot.preservedTrailerEntries {
+            references.append(
+                contentsOf: try scan(
+                    entry.rawValue,
+                    integerObjects: integerObjects,
+                    objectReferences: objectReferences
+                )
+            )
+        }
+
+        for reference in references where snapshot.objectBodies[reference] == nil {
+            throw PDFX4FinalizationError.missingReference(reference)
+        }
+    }
+
+    private static func scan(
+        _ data: Data,
+        integerObjects: [PDFObjectReference: Int],
+        objectReferences: Set<PDFObjectReference>
+    ) throws -> [PDFObjectReference] {
+        var scanner = PDFLexicalScanner(
+            data: data,
+            integerObjects: integerObjects,
+            objectReferences: objectReferences
+        )
+        try scanner.scan()
+        return scanner.references
+    }
+
+    private static func directIntegerObjectValue(in objectBody: Data) -> Int? {
+        var cursor = PDFByteCursor(data: objectBody)
+        guard cursor.readInteger() != nil,
+              cursor.readInteger() != nil,
+              cursor.readKeyword("obj"),
+              let value = cursor.readInteger(),
+              cursor.readKeyword("endobj") else {
+            return nil
+        }
+        cursor.skipWhitespaceAndComments()
+        return cursor.position == objectBody.count ? value : nil
+    }
+
+    private mutating func scan() throws {
+        var precedingDictionary: StreamLength?
+
+        while true {
+            skipWhitespaceAndComments()
+            guard position < data.count else { return }
+
+            if readKeyword("stream") {
+                guard let streamLength = precedingDictionary else {
+                    throw PDFX4FinalizationError.malformedXRef
+                }
+                try skipStreamPayload(length: streamLength)
+                precedingDictionary = nil
+                continue
+            }
+
+            let value = try consumeValue()
+            if case let .dictionary(length) = value {
+                precedingDictionary = length
+            } else {
+                precedingDictionary = nil
+            }
+        }
+    }
+
+    private mutating func consumeValue() throws -> Value {
+        skipWhitespaceAndComments()
+        guard position < data.count else { throw PDFX4FinalizationError.malformedXRef }
+
+        if consume("<<") {
+            return .dictionary(try consumeDictionary())
+        }
+        if data[position] == 91 {
+            position += 1
+            try consumeArray()
+            return .other
+        }
+        if data[position] == 40 {
+            try consumeLiteralString()
+            return .other
+        }
+        if data[position] == 60 {
+            try consumeHexString()
+            return .other
+        }
+        if data[position] == 47 {
+            guard readName() != nil else { throw PDFX4FinalizationError.malformedXRef }
+            return .other
+        }
+        if data[position] == 93 || consume(">>") {
+            throw PDFX4FinalizationError.malformedXRef
+        }
+
+        guard let token = readToken() else { throw PDFX4FinalizationError.malformedXRef }
+        if token == Data("obj".utf8) || token == Data("endstream".utf8) {
+            return .other
+        }
+        guard let number = Int(String(decoding: token, as: UTF8.self)) else {
+            return .other
+        }
+
+        let afterFirstNumber = position
+        guard let generation = readIntegerToken(), readKeyword("R") else {
+            position = afterFirstNumber
+            return .integer(number)
+        }
+        let reference = PDFObjectReference(number: number, generation: generation)
+        references.append(reference)
+        return .reference(reference)
+    }
+
+    private mutating func consumeDictionary() throws -> StreamLength? {
+        var streamLength: StreamLength?
+
+        while true {
+            skipWhitespaceAndComments()
+            guard position < data.count else { throw PDFX4FinalizationError.malformedXRef }
+            if consume(">>") { return streamLength }
+
+            guard let name = readName() else { throw PDFX4FinalizationError.malformedXRef }
+            let value = try consumeValue()
+            if name == "Length" {
+                switch value {
+                case let .integer(length) where length >= 0:
+                    streamLength = .direct(length)
+                case let .reference(reference):
+                    streamLength = .indirect(reference)
+                default:
+                    throw PDFX4FinalizationError.malformedXRef
+                }
+            }
+        }
+    }
+
+    private mutating func consumeArray() throws {
+        while true {
+            skipWhitespaceAndComments()
+            guard position < data.count else { throw PDFX4FinalizationError.malformedXRef }
+            if data[position] == 93 {
+                position += 1
+                return
+            }
+            _ = try consumeValue()
+        }
+    }
+
+    private mutating func skipStreamPayload(length: StreamLength) throws {
+        if position < data.count, data[position] == 13 {
+            position += 1
+            if position < data.count, data[position] == 10 { position += 1 }
+        } else if position < data.count, data[position] == 10 {
+            position += 1
+        } else {
+            throw PDFX4FinalizationError.malformedXRef
+        }
+
+        let payloadLength: Int
+        switch length {
+        case let .direct(value):
+            payloadLength = value
+        case let .indirect(reference):
+            guard objectReferences.contains(reference) else {
+                throw PDFX4FinalizationError.missingReference(reference)
+            }
+            guard let value = integerObjects[reference], value >= 0 else {
+                throw PDFX4FinalizationError.malformedXRef
+            }
+            payloadLength = value
+        }
+        guard payloadLength <= data.count - position else {
+            throw PDFX4FinalizationError.malformedXRef
+        }
+        position += payloadLength
+    }
+
+    private mutating func consumeLiteralString() throws {
+        var depth = 0
+        while position < data.count {
+            let byte = data[position]
+            position += 1
+            if byte == 92 {
+                if position < data.count { position += 1 }
+            } else if byte == 40 {
+                depth += 1
+            } else if byte == 41 {
+                depth -= 1
+                if depth == 0 { return }
+            }
+        }
+        throw PDFX4FinalizationError.malformedXRef
+    }
+
+    private mutating func consumeHexString() throws {
+        position += 1
+        while position < data.count {
+            if data[position] == 62 {
+                position += 1
+                return
+            }
+            position += 1
+        }
+        throw PDFX4FinalizationError.malformedXRef
+    }
+
+    private mutating func readIntegerToken() -> Int? {
+        skipWhitespaceAndComments()
+        let start = position
+        guard let token = readToken(), let value = Int(String(decoding: token, as: UTF8.self)) else {
+            position = start
+            return nil
+        }
+        return value
+    }
+
+    private mutating func readName() -> String? {
+        skipWhitespaceAndComments()
+        guard position < data.count, data[position] == 47 else { return nil }
+        position += 1
+        let start = position
+        while position < data.count, !PDFByteCursor.isDelimiter(data[position]) {
+            position += 1
+        }
+        guard position > start else { return nil }
+        return PDFName.decoded(Data(data[start..<position]))
+    }
+
+    private mutating func readToken() -> Data? {
+        skipWhitespaceAndComments()
+        let start = position
+        while position < data.count, !PDFByteCursor.isDelimiter(data[position]) {
+            position += 1
+        }
+        guard position > start else { return nil }
+        return Data(data[start..<position])
+    }
+
+    private mutating func readKeyword(_ keyword: String) -> Bool {
+        skipWhitespaceAndComments()
+        let bytes = Array(keyword.utf8)
+        guard position + bytes.count <= data.count,
+              data[position..<(position + bytes.count)].elementsEqual(bytes),
+              position + bytes.count == data.count || PDFByteCursor.isDelimiter(data[position + bytes.count]) else {
+            return false
+        }
+        position += bytes.count
+        return true
+    }
+
+    private mutating func consume(_ token: String) -> Bool {
+        let bytes = Array(token.utf8)
+        guard position + bytes.count <= data.count,
+              data[position..<(position + bytes.count)].elementsEqual(bytes) else {
+            return false
+        }
+        position += bytes.count
+        return true
+    }
+
+    private mutating func skipWhitespaceAndComments() {
+        while position < data.count {
+            if PDFByteCursor.isWhitespace(data[position]) {
+                position += 1
+            } else if data[position] == 37 {
+                while position < data.count, data[position] != 10, data[position] != 13 {
+                    position += 1
+                }
+            } else {
+                return
+            }
+        }
     }
 }
 
