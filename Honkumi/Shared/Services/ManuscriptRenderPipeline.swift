@@ -29,7 +29,10 @@ nonisolated enum ManuscriptRenderPipeline {
             return cached
         }
 
-        let pages = ManuscriptPaginator.pages(for: preparedDocument)
+        let pages = ManuscriptPaginator.pages(
+            for: preparedDocument,
+            subscriptionStatus: subscriptionStatus
+        )
         let result = ManuscriptPaginationResult(
             document: preparedDocument,
             pages: pages,

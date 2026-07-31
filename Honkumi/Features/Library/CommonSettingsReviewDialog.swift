@@ -22,13 +22,89 @@ nonisolated struct CommonSettingsReviewPresentation:
     var canApply: Bool { !selection.isEmpty }
 }
 
+nonisolated struct CommonSettingsReviewModalState: Equatable {
+    let isPresented: Bool
+
+    var blocksBackgroundInteraction: Bool {
+        isPresented
+    }
+
+    var hidesBackgroundFromAccessibility: Bool {
+        isPresented
+    }
+
+    var dialogIsAccessibilityModal: Bool {
+        isPresented
+    }
+}
+
+nonisolated struct CommonSettingsReviewCardPresentation: Equatable {
+    let height: CGFloat
+    let minY: CGFloat
+    let requiresScrolling: Bool
+}
+
+nonisolated struct CommonSettingsReviewLayout: Equatable {
+    let availableHeight: CGFloat
+    let outerVerticalPadding: CGFloat
+
+    var maximumCardHeight: CGFloat {
+        max(normalizedAvailableHeight - normalizedPadding * 2, 0)
+    }
+
+    func cardPresentation(
+        forContentHeight contentHeight: CGFloat
+    ) -> CommonSettingsReviewCardPresentation {
+        let normalizedContentHeight = contentHeight.isFinite
+            ? max(contentHeight, 0)
+            : 0
+        let height = min(normalizedContentHeight, maximumCardHeight)
+
+        return CommonSettingsReviewCardPresentation(
+            height: height,
+            minY: max(
+                (normalizedAvailableHeight - height) / 2,
+                normalizedPadding
+            ),
+            requiresScrolling: normalizedContentHeight > maximumCardHeight
+        )
+    }
+
+    private var normalizedAvailableHeight: CGFloat {
+        availableHeight.isFinite ? max(availableHeight, 0) : 0
+    }
+
+    private var normalizedPadding: CGFloat {
+        outerVerticalPadding.isFinite ? max(outerVerticalPadding, 0) : 0
+    }
+}
+
 struct CommonSettingsReviewDialog: View {
     @Binding var selection: UserDefaultSettingsSelection
+    let maximumHeight: CGFloat
     let onApply: () -> Void
     let onKeepCurrent: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
+        ViewThatFits(in: .vertical) {
+            dialogContent
+
+            ScrollView(.vertical) {
+                dialogContent
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .padding(20)
+        .frame(maxWidth: 360)
+        .frame(maxHeight: maximumHeight)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .shadow(radius: 24, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+    }
+
+    private var dialogContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(CommonSettingsReviewCopy.title)
                 .font(.headline)
@@ -68,10 +144,6 @@ struct CommonSettingsReviewDialog: View {
             )
             .frame(maxWidth: .infinity)
         }
-        .padding(20)
-        .frame(maxWidth: 360)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-        .shadow(radius: 24, y: 8)
     }
 
     private func selectionRow(

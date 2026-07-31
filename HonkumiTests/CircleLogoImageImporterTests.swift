@@ -171,6 +171,66 @@ final class CircleLogoImageImporterTests: XCTestCase {
         }
     }
 
+    func testSupportedRelativeDimensionsUseValidViewBox() async throws {
+        let relativeDimensionPairs = [
+            ("2em", "3ex"),
+            ("1rem", "1lh"),
+            ("10dvw", "10svh"),
+            ("5cqi", "5cqmin")
+        ]
+
+        for (width, height) in relativeDimensionPairs {
+            let data = Data("""
+            <svg xmlns="http://www.w3.org/2000/svg"
+                 width="\(width)" height="\(height)"
+                 viewBox="0 0 200 100">
+              <rect width="200" height="100" fill="#000"/>
+            </svg>
+            """.utf8)
+
+            let png = try await CircleLogoImageImporter.importedImageData(
+                data,
+                contentType: .svg
+            )
+            let image = try XCTUnwrap(UIImage(data: png)?.cgImage)
+
+            XCTAssertEqual(image.width, 2048, width)
+            XCTAssertEqual(image.height, 1024, height)
+        }
+    }
+
+    func testRelativeDimensionsWithInvalidViewBoxRemainInvalid() async {
+        do {
+            _ = try await CircleLogoImageImporter.importedImageData(
+                Data("""
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     width="2em" height="3ex"
+                     viewBox="0 0 0 100"></svg>
+                """.utf8),
+                contentType: .svg
+            )
+            XCTFail("Expected invalid SVG")
+        } catch {
+            XCTAssertEqual(error as? CircleLogoImageImportError, .invalidSVG)
+        }
+    }
+
+    func testUnknownDimensionUnitRemainsInvalidWithValidViewBox() async {
+        do {
+            _ = try await CircleLogoImageImporter.importedImageData(
+                Data("""
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     width="2mystery" height="3ex"
+                     viewBox="0 0 200 100"></svg>
+                """.utf8),
+                contentType: .svg
+            )
+            XCTFail("Expected invalid SVG")
+        } catch {
+            XCTAssertEqual(error as? CircleLogoImageImportError, .invalidSVG)
+        }
+    }
+
     func testInvalidSVGThrowsSpecificImportError() async {
         do {
             _ = try await CircleLogoImageImporter.importedImageData(

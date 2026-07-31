@@ -111,8 +111,10 @@ struct ColophonSettingsView: View {
     }
 
     private var colophonIdentityFields: some View {
-        Group {
-            if !viewModel.settings.colophon.hasCreatorImage {
+        let access = circleLogoCreatorAccess
+
+        return Group {
+            if access.showsIdentityFields {
                 Toggle("作者名を表示", isOn: colophonBinding(\.showsAuthorName))
                 if viewModel.settings.colophon.showsAuthorName {
                     TextField("作者名", text: colophonBinding(\.authorName))
@@ -152,6 +154,7 @@ struct ColophonSettingsView: View {
     @ViewBuilder
     private var circleLogoControls: some View {
         let isPaid = proStore.isProUnlocked
+        let access = circleLogoCreatorAccess
 
         HStack {
             Toggle("サークルロゴを使用", isOn: circleImageUsageBinding)
@@ -162,19 +165,21 @@ struct ColophonSettingsView: View {
             }
         }
 
-        if viewModel.settings.colophon.usesCircleImageForCreator {
-            circleLogoImportRow(isPaid: isPaid)
+        if access.showsImportRow {
+            circleLogoImportRow(access: access)
         }
     }
 
     @ViewBuilder
-    private func circleLogoImportRow(isPaid: Bool) -> some View {
+    private func circleLogoImportRow(
+        access: CircleLogoCreatorAccess
+    ) -> some View {
         let imageData = viewModel.settings.colophon.circleImageData
 
-        if isPaid {
-            HStack {
-                imagePreview(data: imageData)
+        HStack {
+            imagePreview(data: imageData)
 
+            if access.canUpload {
                 Button {
                     circleLogoImportPresentation.present(.sourceChooser)
                 } label: {
@@ -184,27 +189,25 @@ struct ColophonSettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("colophon.circleLogo.select")
-
-                Spacer()
-
-                if imageData != nil {
-                    Button(role: .destructive) {
-                        clearImage(\.circleImageData)
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("サークルロゴ画像を削除")
-                }
-            }
-        } else {
-            Button {
-                presentProPurchase()
-            } label: {
-                HStack {
+            } else {
+                Button {
+                    presentProPurchase()
+                } label: {
                     Text("サークルロゴ画像をインポート")
                     paidFeatureBadge
                 }
+            }
+
+            Spacer()
+
+            if access.canDelete {
+                Button(role: .destructive) {
+                    clearImage(\.circleImageData)
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("サークルロゴ画像を削除")
             }
         }
     }
@@ -235,7 +238,7 @@ struct ColophonSettingsView: View {
         Binding(
             get: { viewModel.settings.colophon.usesCircleImageForCreator },
             set: { newValue in
-                guard proStore.isProUnlocked else {
+                guard circleLogoCreatorAccess.canSetUsage(to: newValue) else {
                     presentProPurchase()
                     return
                 }
@@ -244,6 +247,13 @@ struct ColophonSettingsView: View {
                     colophon.usesCircleImageForCreator = newValue
                 }
             }
+        )
+    }
+
+    private var circleLogoCreatorAccess: CircleLogoCreatorAccess {
+        CircleLogoCreatorAccess(
+            colophon: viewModel.settings.colophon,
+            isPaid: proStore.isProUnlocked
         )
     }
 

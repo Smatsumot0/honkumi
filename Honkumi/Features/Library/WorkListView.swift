@@ -21,9 +21,21 @@ struct WorkListView: View {
         CommonSettingsReviewPresentation?
 
     var body: some View {
-        List {
-            ForEach(documentStore.categories) { category in
-                categorySection(category)
+        ZStack {
+            List {
+                ForEach(documentStore.categories) { category in
+                    categorySection(category)
+                }
+            }
+            .disabled(reviewModalState.blocksBackgroundInteraction)
+            .accessibilityHidden(
+                reviewModalState.hidesBackgroundFromAccessibility
+            )
+
+            if pendingSettingsReview != nil {
+                pendingSettingsReviewOverlay
+                    .transition(.opacity)
+                    .zIndex(10)
             }
         }
         .toolbar {
@@ -33,12 +45,20 @@ struct WorkListView: View {
                 } label: {
                     Label("デフォルト設定", systemImage: "gearshape")
                 }
+                .disabled(reviewModalState.blocksBackgroundInteraction)
+                .accessibilityHidden(
+                    reviewModalState.hidesBackgroundFromAccessibility
+                )
 
                 Button {
                     onShowDefaultColophonSettings()
                 } label: {
                     Label("発行者情報", systemImage: "person.crop.rectangle")
                 }
+                .disabled(reviewModalState.blocksBackgroundInteraction)
+                .accessibilityHidden(
+                    reviewModalState.hidesBackgroundFromAccessibility
+                )
 
                 Button {
                     workTitle = ""
@@ -47,6 +67,10 @@ struct WorkListView: View {
                 } label: {
                     Label("作品を追加", systemImage: "doc.badge.plus")
                 }
+                .disabled(reviewModalState.blocksBackgroundInteraction)
+                .accessibilityHidden(
+                    reviewModalState.hidesBackgroundFromAccessibility
+                )
 
                 Button {
                     categoryName = ""
@@ -54,6 +78,10 @@ struct WorkListView: View {
                 } label: {
                     Label("カテゴリを追加", systemImage: "folder.badge.plus")
                 }
+                .disabled(reviewModalState.blocksBackgroundInteraction)
+                .accessibilityHidden(
+                    reviewModalState.hidesBackgroundFromAccessibility
+                )
             }
         }
         .alert("カテゴリを作成", isPresented: $showsNewCategoryAlert) {
@@ -115,26 +143,38 @@ struct WorkListView: View {
                 }
             }
         }
-        .overlay {
-            if pendingSettingsReview != nil {
-                ZStack {
-                    Color.black.opacity(0.28)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture {}
+    }
 
-                    CommonSettingsReviewDialog(
-                        selection: pendingSelectionBinding,
-                        onApply: applyPendingSettingsReview,
-                        onKeepCurrent: keepCurrentPendingSettingsReview,
-                        onCancel: { pendingSettingsReview = nil }
-                    )
-                    .padding(24)
-                }
-                .transition(.opacity)
-                .zIndex(10)
+    private var pendingSettingsReviewOverlay: some View {
+        GeometryReader { geometry in
+            let layout = CommonSettingsReviewLayout(
+                availableHeight: geometry.size.height,
+                outerVerticalPadding: 24
+            )
+
+            ZStack {
+                Color.black.opacity(0.28)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
+                    .accessibilityHidden(true)
+
+                CommonSettingsReviewDialog(
+                    selection: pendingSelectionBinding,
+                    maximumHeight: layout.maximumCardHeight,
+                    onApply: applyPendingSettingsReview,
+                    onKeepCurrent: keepCurrentPendingSettingsReview,
+                    onCancel: { pendingSettingsReview = nil }
+                )
+                .padding(.horizontal, 24)
             }
         }
+    }
+
+    private var reviewModalState: CommonSettingsReviewModalState {
+        CommonSettingsReviewModalState(
+            isPresented: pendingSettingsReview != nil
+        )
     }
 
     private func categorySection(_ category: WorkCategory) -> some View {

@@ -226,6 +226,23 @@ private final class CircleLogoSVGRenderer: NSObject, WKNavigationDelegate {
 
 @MainActor
 private final class CircleLogoSVGSizeParser: NSObject, XMLParserDelegate {
+    private static let supportedRelativeUnits: Set<String> = [
+        "%",
+        "em", "rem",
+        "ex", "rex",
+        "cap", "rcap",
+        "ch", "rch",
+        "ic", "ric",
+        "lh", "rlh",
+        "vw", "svw", "lvw", "dvw",
+        "vh", "svh", "lvh", "dvh",
+        "vi", "svi", "lvi", "dvi",
+        "vb", "svb", "lvb", "dvb",
+        "vmin", "svmin", "lvmin", "dvmin",
+        "vmax", "svmax", "lvmax", "dvmax",
+        "cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"
+    ]
+
     private enum RootDimension: Equatable {
         case absolute(CGFloat)
         case relative
@@ -306,7 +323,7 @@ private final class CircleLogoSVGSizeParser: NSObject, XMLParserDelegate {
         let suffix = value[scanner.currentIndex...]
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        if suffix == "%" {
+        if supportedRelativeUnits.contains(suffix) {
             return .relative
         }
 

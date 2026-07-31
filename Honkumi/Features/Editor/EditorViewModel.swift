@@ -235,7 +235,10 @@ final class EditorViewModel: ObservableObject {
                 from: documentSnapshot,
                 subscriptionStatus: subscriptionStatus
             )
-            let pageCount = ManuscriptPaginator.pages(for: metricsDocument).count
+            let pageCount = ManuscriptPaginator.pages(
+                for: metricsDocument,
+                subscriptionStatus: subscriptionStatus
+            ).count
             guard !Task.isCancelled else { return }
             await self?.applyMetrics(
                 characterCount: characterCount,

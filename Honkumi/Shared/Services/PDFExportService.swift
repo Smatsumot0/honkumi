@@ -1218,7 +1218,10 @@ nonisolated struct BodyPDFExportService {
         isAdditionalFontPackUnlocked: Bool,
         in layout: PageLayout
     ) {
-        let entries = ManuscriptPaginator.colophonEntries(from: colophon)
+        let entries = ManuscriptPaginator.colophonEntries(
+            from: colophon,
+            subscriptionStatus: subscriptionStatus
+        )
         let font = pdfFont(
             size: layout.fontSize,
             in: layout,
@@ -1278,8 +1281,10 @@ nonisolated struct BodyPDFExportService {
                     in: layout
                 )
             } else if entry.id == "creator",
-                      subscriptionStatus == .paid,
-                      colophon.hasCreatorImage,
+                      CircleLogoCreatorAccess(
+                        colophon: colophon,
+                        isPaid: subscriptionStatus == .paid
+                      ).isCreatorLogoActive,
                       drawHorizontalCircleLogoCreator(
                         colophon,
                         y: cursorY,
@@ -1344,7 +1349,10 @@ nonisolated struct BodyPDFExportService {
         lineHeight: CGFloat,
         in layout: PageLayout
     ) -> CGFloat {
-        let entries = ManuscriptPaginator.colophonEntries(from: colophon)
+        let entries = ManuscriptPaginator.colophonEntries(
+            from: colophon,
+            subscriptionStatus: subscriptionStatus
+        )
         guard !entries.isEmpty else { return 0 }
 
         var height: CGFloat = CGFloat(max(entries.count - 1, 0)) * 8
@@ -1405,8 +1413,10 @@ nonisolated struct BodyPDFExportService {
         }
 
         if entry.id == "creator",
-           subscriptionStatus == .paid,
-           colophon.hasCreatorImage {
+           CircleLogoCreatorAccess(
+            colophon: colophon,
+            isPaid: subscriptionStatus == .paid
+           ).isCreatorLogoActive {
             return max(
                 lineHeight,
                 creatorImageBlockHeight(
@@ -1961,9 +1971,14 @@ nonisolated struct BodyPDFExportService {
                 isAdditionalFontPackUnlocked: true
             )
         ]
-        let urlWidth = (colophon.websiteURL as NSString).size(withAttributes: valueAttributes).width
+        let placement = verticalColophonHPPlacement(
+            websiteURL: colophon.websiteURL,
+            valueAttributes: valueAttributes,
+            metrics: metrics,
+            in: layout
+        )
         let rect = CGRect(
-            x: metrics.valueX + max((urlWidth - metrics.qrSize) / 2, 0),
+            x: placement.qrX,
             y: metrics.blockY,
             width: metrics.qrSize,
             height: metrics.qrSize
@@ -1972,7 +1987,10 @@ nonisolated struct BodyPDFExportService {
     }
 
     private func drawVerticalHorizontalColophonEntries(_ colophon: ColophonSettings, in layout: PageLayout) {
-        let entries = ManuscriptPaginator.verticalHorizontalColophonEntries(from: colophon)
+        let entries = ManuscriptPaginator.verticalHorizontalColophonEntries(
+            from: colophon,
+            subscriptionStatus: .paid
+        )
         guard !entries.isEmpty else { return }
 
         let font = pdfFont(
@@ -1991,9 +2009,16 @@ nonisolated struct BodyPDFExportService {
         let metrics = verticalHorizontalColophonMetrics(in: layout)
 
         if let hpEntry = entries.first(where: { $0.id == "hp" }) {
+            let placement = verticalColophonHPPlacement(
+                websiteURL: hpEntry.value,
+                valueAttributes: valueAttributes,
+                metrics: metrics,
+                in: layout
+            )
             drawVerticalHorizontalColophonRow(
                 hpEntry,
                 y: metrics.blockY + metrics.qrSize + 4,
+                valueX: placement.urlX,
                 metrics: metrics,
                 labelAttributes: labelAttributes,
                 valueAttributes: valueAttributes
@@ -2016,6 +2041,7 @@ nonisolated struct BodyPDFExportService {
     private func drawVerticalHorizontalColophonRow(
         _ entry: ColophonEntry,
         y: CGFloat,
+        valueX: CGFloat? = nil,
         metrics: VerticalHorizontalColophonMetrics,
         labelAttributes: [NSAttributedString.Key: Any],
         valueAttributes: [NSAttributedString.Key: Any]
@@ -2026,12 +2052,30 @@ nonisolated struct BodyPDFExportService {
         )
         (entry.value as NSString).draw(
             in: CGRect(
-                x: metrics.valueX,
+                x: valueX ?? metrics.valueX,
                 y: y,
                 width: metrics.valueWidth,
                 height: metrics.lineHeight
             ),
             withAttributes: valueAttributes
+        )
+    }
+
+    private func verticalColophonHPPlacement(
+        websiteURL: String,
+        valueAttributes: [NSAttributedString.Key: Any],
+        metrics: VerticalHorizontalColophonMetrics,
+        in layout: PageLayout
+    ) -> VerticalColophonHPPlacement {
+        VerticalColophonHPPlacement.make(
+            valueX: metrics.valueX,
+            availableWidth: metrics.valueWidth,
+            urlWidth: (websiteURL as NSString).size(
+                withAttributes: valueAttributes
+            ).width,
+            qrSize: metrics.qrSize,
+            bodyMinX: layout.bodyFrame.minX,
+            bodyMaxX: layout.bodyFrame.maxX
         )
     }
 

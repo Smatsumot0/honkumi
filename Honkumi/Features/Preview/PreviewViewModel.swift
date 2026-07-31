@@ -72,7 +72,10 @@ private struct TableOfContentsPaginationRow {
 nonisolated enum ManuscriptPaginator {
     private static let maxTableOfContentsPasses = 6
 
-    static func pages(for document: ManuscriptDocument) -> [PreviewPage] {
+    static func pages(
+        for document: ManuscriptDocument,
+        subscriptionStatus: SubscriptionStatus = .free
+    ) -> [PreviewPage] {
         #if DEBUG
         ManuscriptPaginatorInstrumentation.recordPagesCall()
         #endif
@@ -84,15 +87,23 @@ nonisolated enum ManuscriptPaginator {
             segments,
             settings: settings,
             workTitle: document.title,
-            tableOfContentsEntries: []
+            tableOfContentsEntries: [],
+            subscriptionStatus: subscriptionStatus
         ), settings: settings)
 
         guard settings.showTableOfContents else {
             return appendingColophonIfNeeded(
-                to: paginate(segments, settings: settings, workTitle: document.title, tableOfContentsEntries: []),
+                to: paginate(
+                    segments,
+                    settings: settings,
+                    workTitle: document.title,
+                    tableOfContentsEntries: [],
+                    subscriptionStatus: subscriptionStatus
+                ),
                 hasColophonPlaceholder: segments.contains(where: \.isColophonPlaceholder),
                 settings: settings,
-                workTitle: document.title
+                workTitle: document.title,
+                subscriptionStatus: subscriptionStatus
             )
         }
 
@@ -100,7 +111,8 @@ nonisolated enum ManuscriptPaginator {
             segments,
             settings: settings,
             workTitle: document.title,
-            tableOfContentsEntries: tableOfContentsEntries
+            tableOfContentsEntries: tableOfContentsEntries,
+            subscriptionStatus: subscriptionStatus
         )
         for _ in 0..<maxTableOfContentsPasses {
             let updatedEntries = chapterEntries(in: pages, settings: settings)
@@ -109,7 +121,8 @@ nonisolated enum ManuscriptPaginator {
                     to: pages,
                     hasColophonPlaceholder: segments.contains(where: \.isColophonPlaceholder),
                     settings: settings,
-                    workTitle: document.title
+                    workTitle: document.title,
+                    subscriptionStatus: subscriptionStatus
                 )
             }
 
@@ -118,7 +131,8 @@ nonisolated enum ManuscriptPaginator {
                 segments,
                 settings: settings,
                 workTitle: document.title,
-                tableOfContentsEntries: tableOfContentsEntries
+                tableOfContentsEntries: tableOfContentsEntries,
+                subscriptionStatus: subscriptionStatus
             )
         }
 
@@ -126,7 +140,8 @@ nonisolated enum ManuscriptPaginator {
             to: pages,
             hasColophonPlaceholder: segments.contains(where: \.isColophonPlaceholder),
             settings: settings,
-            workTitle: document.title
+            workTitle: document.title,
+            subscriptionStatus: subscriptionStatus
         )
     }
 
@@ -156,7 +171,8 @@ nonisolated enum ManuscriptPaginator {
         _ segments: [ParsedManuscriptSegment],
         settings: EditorSettings,
         workTitle: String,
-        tableOfContentsEntries: [TableOfContentsEntry]
+        tableOfContentsEntries: [TableOfContentsEntry],
+        subscriptionStatus: SubscriptionStatus
     ) -> [PreviewPage] {
         let maxLines = max(settings.linesPerPage, 1)
         var pages: [PreviewPage] = []
@@ -195,7 +211,11 @@ nonisolated enum ManuscriptPaginator {
         for (segmentIndex, segment) in segments.enumerated() {
             if segment.isColophonPlaceholder {
                 appendCurrentPage()
-                if let colophonPage = colophonPage(settings: settings, workTitle: workTitle) {
+                if let colophonPage = colophonPage(
+                    settings: settings,
+                    workTitle: workTitle,
+                    subscriptionStatus: subscriptionStatus
+                ) {
                     pages.append(colophonPage)
                 }
                 currentStartsAfterPageBreak = false
@@ -303,30 +323,49 @@ nonisolated enum ManuscriptPaginator {
         to pages: [PreviewPage],
         hasColophonPlaceholder: Bool,
         settings: EditorSettings,
-        workTitle: String
+        workTitle: String,
+        subscriptionStatus: SubscriptionStatus
     ) -> [PreviewPage] {
-        guard !hasColophonPlaceholder, let colophonPage = colophonPage(settings: settings, workTitle: workTitle) else {
+        guard !hasColophonPlaceholder,
+              let colophonPage = colophonPage(
+                settings: settings,
+                workTitle: workTitle,
+                subscriptionStatus: subscriptionStatus
+              ) else {
             return pages
         }
 
         return pages + [colophonPage]
     }
 
-    private static func colophonPage(settings: EditorSettings, workTitle: String) -> PreviewPage? {
+    private static func colophonPage(
+        settings: EditorSettings,
+        workTitle: String,
+        subscriptionStatus: SubscriptionStatus
+    ) -> PreviewPage? {
         var colophon = settings.colophon.validated
         colophon.workTitle = workTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard colophon.isEnabled else { return nil }
 
         return PreviewPage(
             kind: .colophon(colophon),
-            columns: colophonColumns(from: colophon),
+            columns: colophonColumns(
+                from: colophon,
+                subscriptionStatus: subscriptionStatus
+            ),
             startsAfterPageBreak: false,
             chapterTitle: nil
         )
     }
 
-    static func colophonColumns(from colophon: ColophonSettings) -> [String] {
-        let entries = colophonEntries(from: colophon)
+    static func colophonColumns(
+        from colophon: ColophonSettings,
+        subscriptionStatus: SubscriptionStatus
+    ) -> [String] {
+        let entries = colophonEntries(
+            from: colophon,
+            subscriptionStatus: subscriptionStatus
+        )
         let labelCharacterCount = entries.map { $0.label.count }.max() ?? 0
         var columns: [String] = []
 
@@ -354,15 +393,28 @@ nonisolated enum ManuscriptPaginator {
         return columns
     }
 
-    static func verticalHorizontalColophonEntries(from colophon: ColophonSettings) -> [ColophonEntry] {
-        colophonEntries(from: colophon).filter { ["hp", "x", "pixiv", "contact"].contains($0.id) }
+    static func verticalHorizontalColophonEntries(
+        from colophon: ColophonSettings,
+        subscriptionStatus: SubscriptionStatus
+    ) -> [ColophonEntry] {
+        colophonEntries(
+            from: colophon,
+            subscriptionStatus: subscriptionStatus
+        ).filter { ["hp", "x", "pixiv", "contact"].contains($0.id) }
     }
 
     private static func isVerticalHorizontalColophonEntry(_ entry: ColophonEntry) -> Bool {
         ["hp", "x", "pixiv", "contact"].contains(entry.id)
     }
 
-    static func colophonEntries(from colophon: ColophonSettings) -> [ColophonEntry] {
+    static func colophonEntries(
+        from colophon: ColophonSettings,
+        subscriptionStatus: SubscriptionStatus
+    ) -> [ColophonEntry] {
+        let creatorAccess = CircleLogoCreatorAccess(
+            colophon: colophon,
+            isPaid: subscriptionStatus == .paid
+        )
         var entries = [
             ColophonEntry(
                 id: "workTitle",
@@ -431,9 +483,9 @@ nonisolated enum ManuscriptPaginator {
 
         return entries.filter { entry in
             if entry.id == "creator" {
-                return colophon.hasCreatorImage
+                return creatorAccess.isCreatorLogoActive
             }
-            if colophon.hasCreatorImage,
+            if creatorAccess.isCreatorLogoActive,
                entry.id == "author" || entry.id == "circle" {
                 return false
             }
