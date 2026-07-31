@@ -87,6 +87,8 @@ nonisolated struct CircleLogoRenderPlacement: Equatable {
             width: bodyFrame.width * 0.5,
             height: lineHeight * 4
         )
+        guard maximumSize.width.isFinite,
+              maximumSize.height.isFinite else { return nil }
         let scale = min(
             maximumSize.width / imageSize.width,
             maximumSize.height / imageSize.height
@@ -97,12 +99,19 @@ nonisolated struct CircleLogoRenderPlacement: Equatable {
             width: imageSize.width * scale,
             height: imageSize.height * scale
         )
+        guard size.width.isFinite,
+              size.height.isFinite,
+              bodyFrame.midX.isFinite else { return nil }
         let rect = CGRect(
             x: bodyFrame.midX - size.width / 2,
             y: y,
             width: size.width,
             height: size.height
         )
+        guard rect.minX.isFinite,
+              rect.minY.isFinite,
+              rect.width.isFinite,
+              rect.height.isFinite else { return nil }
         return CircleLogoRenderPlacement(rect: rect)
     }
 

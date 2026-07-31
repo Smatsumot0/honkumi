@@ -105,6 +105,22 @@ final class ColophonCreatorVisibilityTests: XCTestCase {
         )
     }
 
+    func testCircleLogoPlacementRejectsNonFiniteDerivedRect() {
+        XCTAssertNil(
+            CircleLogoRenderPlacement.make(
+                imageSize: CGSize(width: 100, height: 100),
+                bodyFrame: CGRect(
+                    x: CGFloat.greatestFiniteMagnitude,
+                    y: 0,
+                    width: 200,
+                    height: 300
+                ),
+                lineHeight: 20,
+                y: 0
+            )
+        )
+    }
+
     func testActiveLogoOmitsAuthorAndCircleWithoutDeletingValues() {
         var colophon = ColophonSettings.default
         colophon.authorName = "保持する作者"

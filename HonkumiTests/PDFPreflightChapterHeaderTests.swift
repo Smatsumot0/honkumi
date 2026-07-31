@@ -3,6 +3,30 @@ import UIKit
 import XCTest
 
 final class PDFPreflightChapterHeaderTests: XCTestCase {
+    func testLowResolutionCreatorLogoAtEnlargedRenderedSizeAddsWarning() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(
+            size: CGSize(width: 200, height: 200),
+            format: format
+        )
+        let imageData = renderer.pngData { _ in }
+        var settings = EditorSettings.default
+        settings.colophon.isEnabled = true
+        settings.colophon.usesCircleImageForCreator = true
+        settings.colophon.circleImageData = imageData
+        let document = ManuscriptDocument(title: "画像解像度", body: "本文", settings: settings)
+
+        let result = PDFPreflightService().check(
+            document: document,
+            subscriptionStatus: .paid
+        )
+
+        XCTAssertTrue(result.issues.contains {
+            $0.id == "print.imageResolution.lowCreator"
+        })
+    }
+
     func testSinglePageChapterHeaderAddsNoOverflowIssue() {
         let document = makeDocument(title: "短い章題", bodyCharacterCount: 700)
 
