@@ -189,6 +189,12 @@ nonisolated private struct RenderedPDFPage {
 }
 
 nonisolated struct BodyPDFExportService {
+    private let finalizer: any PDFFileFinalizing
+
+    init(finalizer: any PDFFileFinalizing = PDFX4FileFinalizer()) {
+        self.finalizer = finalizer
+    }
+
     func export(document: ManuscriptDocument, subscriptionStatus: SubscriptionStatus = .free) throws -> URL {
         try export(
             document: document,
@@ -258,7 +264,7 @@ nonisolated struct BodyPDFExportService {
                 firstGeometry: firstGeometry
             )
             try Task.checkCancellation()
-            try PDFPrintProduction.normalizePDFVersionHeader(at: outputURL)
+            try finalizer.finalize(at: outputURL)
             try Task.checkCancellation()
             return outputURL
         }
@@ -322,7 +328,7 @@ nonisolated struct BodyPDFExportService {
             throw CancellationError()
         }
         try Task.checkCancellation()
-        try PDFPrintProduction.normalizePDFVersionHeader(at: outputURL)
+        try finalizer.finalize(at: outputURL)
         try Task.checkCancellation()
         return outputURL
         } catch {

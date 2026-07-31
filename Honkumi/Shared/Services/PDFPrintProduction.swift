@@ -40,22 +40,6 @@ nonisolated enum PDFPrintProduction {
             trimOffset: CGSize(width: cropMarkInset, height: cropMarkInset)
         )
     }
-
-    static func normalizePDFVersionHeader(at url: URL) throws {
-        var data = try Data(contentsOf: url)
-        let targetHeader = Data("%PDF-\(targetPDFVersion)".utf8)
-        guard data.count >= targetHeader.count,
-              data.starts(with: Data("%PDF-".utf8)),
-              data.prefix(targetHeader.count) != targetHeader else {
-            return
-        }
-
-        // CoreGraphics does not expose a PDF version option. Replacing only
-        // the fixed-width header keeps object offsets and xref positions stable,
-        // but does not by itself prove PDF/X-4 conformance.
-        data.replaceSubrange(0..<targetHeader.count, with: targetHeader)
-        try data.write(to: url, options: .atomic)
-    }
 }
 
 nonisolated struct PDFBleedSettings: Equatable {
@@ -101,11 +85,13 @@ nonisolated struct PDFX4ProductionProfile {
 
     static let implementedCapabilities: [String] = [
         "PDF/X-4 target XMP metadata",
-        "PDF-1.6 header normalization after CoreGraphics rendering",
+        "PDF-1.6 deterministic xref finalization",
+        "Info Dictionary /Trapped /False",
         "Output Intent",
         "ICC profile embedding through CGColorSpace",
         "MediaBox / TrimBox / BleedBox / CropBox",
         "Unencrypted PDF output",
+        "Post-export structural and font-embedding tests",
         "Vector text, rules, crop marks, page numbers, and QR code drawing"
     ]
 
@@ -114,10 +100,8 @@ nonisolated struct PDFX4ProductionProfile {
     // Keep these gaps explicit so a future veraPDF/Ghostscript validation layer
     // can replace this profile boundary instead of scattering checks.
     static let unsupportedCapabilities: [String] = [
-        "Automated PDF/X-4 conformance validation",
-        "Print-shop-specific ICC profile selection",
-        "Guaranteed PDF/X-4 low-level object constraints beyond the patched header",
-        "Post-export verification that every font subset is embedded"
+        "Bundled certified PDF/X-4 product preflight",
+        "Print-shop-specific ICC profile selection"
     ]
 
     var outputIntentColorSpace: CGColorSpace? {
