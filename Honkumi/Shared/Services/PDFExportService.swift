@@ -1486,19 +1486,27 @@ nonisolated struct BodyPDFExportService {
             isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
             in: layout
         )
-        let blockWidth = max(qrSize, min(valueLayout.frameWidth, availableValueWidth))
-        let blockX = valueX + max((availableValueWidth - blockWidth) / 2, 0)
-        let qrX = blockX + max((blockWidth - qrSize) / 2, 0)
-        let urlX = blockX + max((blockWidth - valueLayout.frameWidth) / 2, 0)
-        drawQRCode(qrCode, in: CGRect(x: qrX, y: y, width: qrSize, height: qrSize))
+        let placement = HorizontalColophonHPPlacement.make(
+            valueX: valueX,
+            availableWidth: availableValueWidth,
+            urlWidth: valueLayout.frameWidth,
+            qrSize: qrSize,
+            showsURL: colophon.showsWebsiteURL,
+            bodyMinX: layout.bodyFrame.minX,
+            bodyMaxX: layout.bodyFrame.maxX
+        )
+        drawQRCode(
+            qrCode,
+            in: CGRect(x: placement.qrX, y: y, width: qrSize, height: qrSize)
+        )
 
         let valueY = y + qrSize + horizontalColophonQRCodeTextGap(in: layout)
         if colophon.showsWebsiteURL, valueY <= layout.bodyFrame.maxY - valueLayout.height + 0.5 {
             drawFittedHorizontalColophonValue(
                 entry.value,
-                x: urlX,
+                x: placement.urlX,
                 y: valueY,
-                maxWidth: valueLayout.frameWidth,
+                maxWidth: availableValueWidth,
                 baseLineHeight: valueLayout.lineHeight,
                 baseAttributes: valueAttributes,
                 isAdditionalFontPackUnlocked: isAdditionalFontPackUnlocked,
