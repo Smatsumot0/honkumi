@@ -62,6 +62,54 @@ final class ManuscriptFormatterTests: XCTestCase {
         )
     }
 
+    func testBlankLineLimitPreservesTrailingEditingLineAfterAllowedBlankLine() {
+        var settings = FormatSettings.default
+        settings.enableAutoFormat = true
+        settings.enableNormalizeBlankLines = true
+        settings.maxConsecutiveBlankLines = 1
+
+        XCTAssertEqual(
+            ManuscriptFormatter.formatManuscriptText(
+                "本文\n\n",
+                settings: settings,
+                options: FormatOptions(isPremiumUser: false)
+            ),
+            "本文\n\n"
+        )
+    }
+
+    func testBlankLineLimitRemovesOverflowBeforeTrailingEditingLine() {
+        var settings = FormatSettings.default
+        settings.enableAutoFormat = true
+        settings.enableNormalizeBlankLines = true
+        settings.maxConsecutiveBlankLines = 1
+
+        XCTAssertEqual(
+            ManuscriptFormatter.formatManuscriptText(
+                "本文\n\n\n",
+                settings: settings,
+                options: FormatOptions(isPremiumUser: false)
+            ),
+            "本文\n\n"
+        )
+    }
+
+    func testZeroBlankLineLimitPreservesTrailingEditingLine() {
+        var settings = FormatSettings.default
+        settings.enableAutoFormat = true
+        settings.enableNormalizeBlankLines = true
+        settings.maxConsecutiveBlankLines = 0
+
+        XCTAssertEqual(
+            ManuscriptFormatter.formatManuscriptText(
+                "本文\n",
+                settings: settings,
+                options: FormatOptions(isPremiumUser: false)
+            ),
+            "本文\n"
+        )
+    }
+
     private func enabledPremiumSettings() -> FormatSettings {
         var settings = FormatSettings.default
         settings.enableAutoFormat = true
