@@ -172,6 +172,10 @@ enum PDFX4TestInspectionError: Error, Equatable {
 }
 
 enum PDFX4TestInspector {
+    static func inspectXMP(_ data: Data) throws -> PDFXMPTestSnapshot {
+        try xmpSnapshot(from: data)
+    }
+
     static func inspect(_ data: Data) throws -> PDFX4SemanticSnapshot {
         guard
             let provider = CGDataProvider(data: data as CFData),
@@ -821,7 +825,14 @@ enum PDFX4TestInspector {
             pdfXVersionCount: delegate.pdfXVersionCount,
             pdfXConformanceCount: delegate.pdfXConformanceCount,
             title: delegate.title,
-            creatorTool: delegate.creatorTool
+            description: delegate.xmpDescription,
+            keywords: delegate.keywords,
+            creatorTool: delegate.creatorTool,
+            producer: delegate.producer,
+            createDate: delegate.createDate,
+            modifyDate: delegate.modifyDate,
+            metadataDate: delegate.metadataDate,
+            creatorCount: delegate.creatorCount
         )
     }
 
@@ -1142,22 +1153,38 @@ private struct PDFContentTokenCursor {
     }
 }
 
-private struct PDFXMPTestSnapshot {
+struct PDFXMPTestSnapshot {
     let pdfXVersionCount: Int
     let pdfXConformanceCount: Int
     let title: String
+    let description: String
+    let keywords: String
     let creatorTool: String
+    let producer: String
+    let createDate: String
+    let modifyDate: String
+    let metadataDate: String
+    let creatorCount: Int
 }
 
 private final class PDFXMPTestParserDelegate: NSObject, XMLParserDelegate {
     private var elementStack: [String] = []
     private var titleBuffer = ""
+    private var descriptionBuffer = ""
     private var isCapturingDefaultTitle = false
+    private var isCapturingDefaultDescription = false
 
     private(set) var pdfXVersionCount = 0
     private(set) var pdfXConformanceCount = 0
     private(set) var title = ""
+    private(set) var xmpDescription = ""
+    private(set) var keywords = ""
     private(set) var creatorTool = ""
+    private(set) var producer = ""
+    private(set) var createDate = ""
+    private(set) var modifyDate = ""
+    private(set) var metadataDate = ""
+    private(set) var creatorCount = 0
     private(set) var hasInvalidPDFXIdentifier = false
     private(set) var defaultTitleCount = 0
 
@@ -1180,18 +1207,43 @@ private final class PDFXMPTestParserDelegate: NSObject, XMLParserDelegate {
         if let value = attributeDict["xmp:CreatorTool"] {
             creatorTool = value
         }
+        if let value = attributeDict["pdf:Keywords"] {
+            keywords = value
+        }
+        if let value = attributeDict["pdf:Producer"] {
+            producer = value
+        }
+        if let value = attributeDict["xmp:CreateDate"] {
+            createDate = value
+        }
+        if let value = attributeDict["xmp:ModifyDate"] {
+            modifyDate = value
+        }
+        if let value = attributeDict["xmp:MetadataDate"] {
+            metadataDate = value
+        }
+        if elementName == "dc:creator" {
+            creatorCount += 1
+        }
         if elementName == "rdf:li",
-           elementStack.contains("dc:title"),
            attributeDict["xml:lang"] == "x-default" {
-            defaultTitleCount += 1
-            isCapturingDefaultTitle = true
-            titleBuffer = ""
+            if elementStack.contains("dc:title") {
+                defaultTitleCount += 1
+                isCapturingDefaultTitle = true
+                titleBuffer = ""
+            } else if elementStack.contains("dc:description") {
+                isCapturingDefaultDescription = true
+                descriptionBuffer = ""
+            }
         }
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         if isCapturingDefaultTitle {
             titleBuffer += string
+        }
+        if isCapturingDefaultDescription {
+            descriptionBuffer += string
         }
     }
 
@@ -1204,6 +1256,10 @@ private final class PDFXMPTestParserDelegate: NSObject, XMLParserDelegate {
         if elementName == "rdf:li", isCapturingDefaultTitle {
             title = titleBuffer
             isCapturingDefaultTitle = false
+        }
+        if elementName == "rdf:li", isCapturingDefaultDescription {
+            xmpDescription = descriptionBuffer
+            isCapturingDefaultDescription = false
         }
         _ = elementStack.popLast()
     }
