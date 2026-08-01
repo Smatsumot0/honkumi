@@ -12,12 +12,12 @@ nonisolated enum PDFExportFlowError: LocalizedError, Equatable {
 }
 
 @MainActor
-protocol PDFExportTimeoutSleeping: AnyObject {
+protocol PDFExportTimeoutSleeping {
     func sleep(for duration: Duration) async throws
 }
 
 @MainActor
-final class TaskPDFExportTimeoutSleeper: PDFExportTimeoutSleeping {
+struct TaskPDFExportTimeoutSleeper: PDFExportTimeoutSleeping {
     func sleep(for duration: Duration) async throws {
         try await Task.sleep(for: duration)
     }

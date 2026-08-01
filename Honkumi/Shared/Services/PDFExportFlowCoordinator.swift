@@ -32,6 +32,10 @@ final class PDFExportFlowCoordinator {
         self.fileManager = fileManager
     }
 
+    // iOS 26.3.x can abort when this object graph uses actor-isolated class deinits.
+    // Keep this nonisolated and the default timeout sleeper value-typed.
+    nonisolated deinit {}
+
     @discardableResult
     func exportAndShare(
         document: ManuscriptDocument,

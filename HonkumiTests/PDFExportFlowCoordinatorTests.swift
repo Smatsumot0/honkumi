@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class PDFExportFlowCoordinatorTests: XCTestCase {
+    func testDefaultCoordinatorCanBeReleasedFromSynchronousMainQueueCallback() async {
+        let didRelease = await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                let released = MainActor.assumeIsolated {
+                    weak var weakCoordinator: PDFExportFlowCoordinator?
+                    autoreleasepool {
+                        let coordinator = PDFExportFlowCoordinator()
+                        weakCoordinator = coordinator
+                    }
+                    return weakCoordinator == nil
+                }
+                continuation.resume(returning: released)
+            }
+        }
+
+        XCTAssertTrue(didRelease)
+    }
+
     func testTimeoutErrorHasRetryableUserMessage() {
         XCTAssertEqual(
             PDFExportFlowError.timedOut.localizedDescription,
