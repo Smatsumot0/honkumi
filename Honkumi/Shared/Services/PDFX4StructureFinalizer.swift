@@ -70,12 +70,12 @@ nonisolated enum PDFX4FinalizationError: Error, Equatable {
 }
 
 nonisolated protocol PDFFileFinalizing: Sendable {
-    func finalize(at url: URL) throws
+    func finalize(at url: URL, metadata: PDFX4DocumentMetadata) throws
 }
 
 nonisolated struct PDFX4FileFinalizer: PDFFileFinalizing {
-    func finalize(at url: URL) throws {
-        try PDFX4StructureFinalizer.finalize(at: url)
+    func finalize(at url: URL, metadata: PDFX4DocumentMetadata) throws {
+        try PDFX4StructureFinalizer.finalize(at: url, metadata: metadata)
     }
 }
 

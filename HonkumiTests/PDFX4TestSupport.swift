@@ -5,7 +5,41 @@ import PDFKit
 import XCTest
 
 nonisolated struct PassthroughPDFFinalizer: PDFFileFinalizing {
-    func finalize(at url: URL) throws {}
+    func finalize(at url: URL, metadata: PDFX4DocumentMetadata) throws {}
+}
+
+nonisolated final class CapturingPDFX4Finalizer: PDFFileFinalizing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var mutableSourceData: [Data] = []
+    private var mutableMetadata: [PDFX4DocumentMetadata] = []
+    private var mutableFinalData: [Data] = []
+
+    var sourceData: [Data] {
+        lock.withLock { mutableSourceData }
+    }
+
+    var metadata: [PDFX4DocumentMetadata] {
+        lock.withLock { mutableMetadata }
+    }
+
+    var finalData: [Data] {
+        lock.withLock { mutableFinalData }
+    }
+
+    func finalize(at url: URL, metadata: PDFX4DocumentMetadata) throws {
+        let source = try Data(contentsOf: url)
+        lock.withLock {
+            mutableSourceData.append(source)
+            mutableMetadata.append(metadata)
+        }
+
+        try PDFX4StructureFinalizer.finalize(at: url, metadata: metadata)
+
+        let finalized = try Data(contentsOf: url)
+        lock.withLock {
+            mutableFinalData.append(finalized)
+        }
+    }
 }
 
 enum PDFTestFixtureBuilder {
@@ -161,8 +195,21 @@ struct PDFX4SemanticSnapshot {
     let pdfXConformanceCount: Int
     let infoTitle: String
     let xmpTitle: String
+    let infoProducer: String
+    let xmpProducer: String
+    let infoSubject: String
+    let xmpDescription: String
+    let infoKeywords: String
+    let xmpKeywords: String
     let infoCreator: String
     let xmpCreatorTool: String
+    let infoAuthor: String?
+    let xmpCreatorCount: Int
+    let infoCreationDate: Date
+    let xmpCreateDateAsDate: Date
+    let infoModificationDate: Date
+    let xmpModifyDateAsDate: Date
+    let xmpMetadataDateAsDate: Date
     let isEncrypted: Bool
     let hasAcroForm: Bool
     let hasJavaScript: Bool
@@ -211,7 +258,19 @@ enum PDFX4TestInspector {
 
         let trappedName = try requiredName(in: info, key: "Trapped")
         let infoTitle = try requiredString(in: info, key: "Title")
+        let infoProducer = try requiredString(in: info, key: "Producer")
+        let infoSubject = try requiredString(in: info, key: "Subject")
+        let infoKeywords = try requiredString(in: info, key: "Keywords")
         let infoCreator = try requiredString(in: info, key: "Creator")
+        let infoAuthor = string(in: info, key: "Author")
+        let infoCreationDate = try pdfDate(
+            from: requiredString(in: info, key: "CreationDate"),
+            key: "CreationDate"
+        )
+        let infoModificationDate = try pdfDate(
+            from: requiredString(in: info, key: "ModDate"),
+            key: "ModDate"
+        )
 
         var outputIntents: CGPDFArrayRef?
         guard CGPDFDictionaryGetArray(catalog, "OutputIntents", &outputIntents),
@@ -253,6 +312,12 @@ enum PDFX4TestInspector {
         }
         let metadata = try decodedData(from: metadataStream, label: "Metadata")
         let xmp = try xmpSnapshot(from: metadata)
+        let xmpCreateDateAsDate = try xmpDate(from: xmp.createDate, key: "xmp:CreateDate")
+        let xmpModifyDateAsDate = try xmpDate(from: xmp.modifyDate, key: "xmp:ModifyDate")
+        let xmpMetadataDateAsDate = try xmpDate(
+            from: xmp.metadataDate,
+            key: "xmp:MetadataDate"
+        )
 
         var embeddedBaseFontNames = Set<String>()
         var unresolvedColorSpaceNames = Set<String>()
@@ -314,8 +379,21 @@ enum PDFX4TestInspector {
             pdfXConformanceCount: xmp.pdfXConformanceCount,
             infoTitle: infoTitle,
             xmpTitle: xmp.title,
+            infoProducer: infoProducer,
+            xmpProducer: xmp.producer,
+            infoSubject: infoSubject,
+            xmpDescription: xmp.description,
+            infoKeywords: infoKeywords,
+            xmpKeywords: xmp.keywords,
             infoCreator: infoCreator,
             xmpCreatorTool: xmp.creatorTool,
+            infoAuthor: infoAuthor,
+            xmpCreatorCount: xmp.creatorCount,
+            infoCreationDate: infoCreationDate,
+            xmpCreateDateAsDate: xmpCreateDateAsDate,
+            infoModificationDate: infoModificationDate,
+            xmpModifyDateAsDate: xmpModifyDateAsDate,
+            xmpMetadataDateAsDate: xmpMetadataDateAsDate,
             isEncrypted: document.isEncrypted,
             hasAcroForm: containsObject(in: catalog, key: "AcroForm"),
             hasJavaScript: hasCatalogJavaScript || hasNamesJavaScript || hasPageJavaScript,
@@ -896,6 +974,28 @@ enum PDFX4TestInspector {
             throw PDFX4TestInspectionError.missingValue(key)
         }
         return value
+    }
+
+    private static func pdfDate(from value: String, key: String) throws -> Date {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "'D:'yyyyMMddHHmmss'Z'"
+        guard let date = formatter.date(from: value) else {
+            throw PDFX4TestInspectionError.missingValue(key)
+        }
+        return date
+    }
+
+    private static func xmpDate(from value: String, key: String) throws -> Date {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)!
+        guard let date = formatter.date(from: value) else {
+            throw PDFX4TestInspectionError.missingValue(key)
+        }
+        return date
     }
 
     private static func containsObject(

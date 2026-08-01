@@ -303,8 +303,12 @@ nonisolated struct BodyPDFExportService {
         let pdfTitle = document.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Honkumi"
             : document.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let metadata = PDFX4DocumentMetadata.make(
+            title: pdfTitle,
+            documentID: document.id
+        )
         let rendererFormat = UIGraphicsPDFRendererFormat()
-        rendererFormat.documentInfo = PDFPrintProduction.pdfX4Profile.documentInfo(title: pdfTitle)
+        rendererFormat.documentInfo = PDFPrintProduction.pdfX4Profile.documentInfo(for: metadata)
         try? FileManager.default.removeItem(at: outputURL)
 
         if previewKind == .spread {
@@ -315,13 +319,12 @@ nonisolated struct BodyPDFExportService {
                 settings: settings,
                 subscriptionStatus: subscriptionStatus,
                 chapterHeaderPlan: chapterHeaderPlan,
-                pdfTitle: pdfTitle,
-                documentID: document.id,
+                metadata: metadata,
                 rendererFormat: rendererFormat,
                 firstGeometry: firstGeometry
             )
             try Task.checkCancellation()
-            try finalizer.finalize(at: outputURL)
+            try finalizer.finalize(at: outputURL, metadata: metadata)
             try Task.checkCancellation()
             return outputURL
         }
@@ -330,12 +333,9 @@ nonisolated struct BodyPDFExportService {
         var renderingWasCancelled = false
 
         try renderer.writePDF(to: outputURL) { context in
-            if let metadata = PDFPrintProduction.pdfX4Profile.xmpMetadataData(
-                title: pdfTitle,
-                documentID: document.id
-            ) {
-                context.cgContext.addDocumentMetadata(metadata as CFData)
-            }
+            context.cgContext.addDocumentMetadata(
+                PDFPrintProduction.pdfX4Profile.xmpMetadataData(for: metadata) as CFData
+            )
 
             let renderedPages = renderedPages(
                 from: pages,
@@ -385,7 +385,7 @@ nonisolated struct BodyPDFExportService {
             throw CancellationError()
         }
         try Task.checkCancellation()
-        try finalizer.finalize(at: outputURL)
+        try finalizer.finalize(at: outputURL, metadata: metadata)
         try Task.checkCancellation()
         return outputURL
         } catch {
@@ -400,8 +400,7 @@ nonisolated struct BodyPDFExportService {
         settings: EditorSettings,
         subscriptionStatus: SubscriptionStatus,
         chapterHeaderPlan: ChapterHeaderLayoutPlan,
-        pdfTitle: String,
-        documentID: UUID,
+        metadata: PDFX4DocumentMetadata,
         rendererFormat: UIGraphicsPDFRendererFormat,
         firstGeometry: PDFPageGeometry
     ) throws {
@@ -423,12 +422,9 @@ nonisolated struct BodyPDFExportService {
         var renderingWasCancelled = false
 
         try renderer.writePDF(to: outputURL) { context in
-            if let metadata = PDFPrintProduction.pdfX4Profile.xmpMetadataData(
-                title: pdfTitle,
-                documentID: documentID
-            ) {
-                context.cgContext.addDocumentMetadata(metadata as CFData)
-            }
+            context.cgContext.addDocumentMetadata(
+                PDFPrintProduction.pdfX4Profile.xmpMetadataData(for: metadata) as CFData
+            )
 
             let renderedPages = spreadRenderedPages(from: pages, settings: settings)
             let poweredByTargetPageID = poweredByHonkumiTargetPageID(
