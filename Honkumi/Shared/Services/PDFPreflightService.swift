@@ -658,11 +658,22 @@ nonisolated struct PDFPreflightService {
         }
 
         let layout = LayoutCalculator.layout(for: settings, pageNumber: max(pages.count, 1))
-        let displayHeight = max(layout.fontSize * 2.4, 18)
-        let aspectRatio = CGFloat(cgImage.width) / max(CGFloat(cgImage.height), 1)
-        let displayWidth = min(displayHeight * aspectRatio, layout.bodyFrame.width * 0.36)
-        let ppiX = CGFloat(cgImage.width) / max(displayWidth / LayoutCalculator.pointsPerInch, 0.01)
-        let ppiY = CGFloat(cgImage.height) / max(displayHeight / LayoutCalculator.pointsPerInch, 0.01)
+        let lineHeight = max(layout.fontSize * 1.65, 12)
+        guard let placement = CircleLogoRenderPlacement.make(
+            imageSize: image.size,
+            bodyFrame: layout.bodyFrame,
+            lineHeight: lineHeight,
+            y: 0
+        ) else { return }
+
+        let ppiX = CGFloat(cgImage.width) / max(
+            placement.rect.width / LayoutCalculator.pointsPerInch,
+            0.01
+        )
+        let ppiY = CGFloat(cgImage.height) / max(
+            placement.rect.height / LayoutCalculator.pointsPerInch,
+            0.01
+        )
         let effectivePPI = min(ppiX, ppiY)
 
         if effectivePPI < 300 {

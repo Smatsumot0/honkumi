@@ -63,6 +63,63 @@ nonisolated private struct VerticalHorizontalColophonMetrics {
     let lineHeight: CGFloat
 }
 
+nonisolated struct CircleLogoRenderPlacement: Equatable {
+    let rect: CGRect
+
+    static func make(
+        imageSize: CGSize,
+        bodyFrame: CGRect,
+        lineHeight: CGFloat,
+        y: CGFloat
+    ) -> CircleLogoRenderPlacement? {
+        guard imageSize.width.isFinite,
+              imageSize.height.isFinite,
+              bodyFrame.minX.isFinite,
+              bodyFrame.width.isFinite,
+              lineHeight.isFinite,
+              y.isFinite,
+              imageSize.width > 0,
+              imageSize.height > 0,
+              bodyFrame.width > 0,
+              lineHeight > 0 else { return nil }
+
+        let maximumSize = CGSize(
+            width: bodyFrame.width * 0.5,
+            height: lineHeight * 4
+        )
+        guard maximumSize.width.isFinite,
+              maximumSize.height.isFinite else { return nil }
+        let scale = min(
+            maximumSize.width / imageSize.width,
+            maximumSize.height / imageSize.height
+        )
+        guard scale.isFinite, scale > 0 else { return nil }
+
+        let size = CGSize(
+            width: imageSize.width * scale,
+            height: imageSize.height * scale
+        )
+        guard size.width.isFinite,
+              size.height.isFinite,
+              bodyFrame.midX.isFinite else { return nil }
+        let rect = CGRect(
+            x: bodyFrame.midX - size.width / 2,
+            y: y,
+            width: size.width,
+            height: size.height
+        )
+        guard rect.minX.isFinite,
+              rect.minY.isFinite,
+              rect.width.isFinite,
+              rect.height.isFinite else { return nil }
+        return CircleLogoRenderPlacement(rect: rect)
+    }
+
+    func blockHeight(minimumLineHeight: CGFloat) -> CGFloat {
+        max(minimumLineHeight, rect.height)
+    }
+}
+
 nonisolated private struct HorizontalColophonTextLayout {
     let fontSize: CGFloat
     let lineHeight: CGFloat
@@ -1294,6 +1351,7 @@ nonisolated struct BodyPDFExportService {
                       drawHorizontalCircleLogoCreator(
                         colophon,
                         y: cursorY,
+                        lineHeight: lineHeight,
                         in: layout
                       ) {
             } else if entry.label.isEmpty {
@@ -1423,12 +1481,12 @@ nonisolated struct BodyPDFExportService {
             colophon: colophon,
             isPaid: subscriptionStatus == .paid
            ).isCreatorLogoActive {
-            return max(
-                lineHeight,
-                creatorImageBlockHeight(
-                    in: layout
-                )
-            )
+            return circleLogoRenderResult(
+                colophon,
+                y: 0,
+                lineHeight: lineHeight,
+                in: layout
+            )?.placement.blockHeight(minimumLineHeight: lineHeight) ?? lineHeight
         }
 
         if entry.label.isEmpty {
@@ -1930,19 +1988,37 @@ nonisolated struct BodyPDFExportService {
     private func drawHorizontalCircleLogoCreator(
         _ colophon: ColophonSettings,
         y: CGFloat,
+        lineHeight: CGFloat,
         in layout: PageLayout
     ) -> Bool {
-        guard let data = colophon.circleImageData,
-              let image = UIImage(data: data) else { return false }
+        guard let result = circleLogoRenderResult(
+            colophon,
+            y: y,
+            lineHeight: lineHeight,
+            in: layout
+        ) else { return false }
 
-        let height = creatorImageHeight(in: layout)
-        let maxImageWidth = layout.bodyFrame.width * 0.36
-        let aspect = image.size.width / max(image.size.height, 1)
-        let imageSize = CGSize(width: min(height * aspect, maxImageWidth), height: height)
-        let x = layout.bodyFrame.midX - imageSize.width / 2
-        drawHighQualityImage(image, in: CGRect(x: x, y: y, width: imageSize.width, height: imageSize.height))
+        drawHighQualityImage(result.image, in: result.placement.rect)
 
         return true
+    }
+
+    private func circleLogoRenderResult(
+        _ colophon: ColophonSettings,
+        y: CGFloat,
+        lineHeight: CGFloat,
+        in layout: PageLayout
+    ) -> (image: UIImage, placement: CircleLogoRenderPlacement)? {
+        guard let data = colophon.circleImageData,
+              let image = UIImage(data: data),
+              let placement = CircleLogoRenderPlacement.make(
+                imageSize: image.size,
+                bodyFrame: layout.bodyFrame,
+                lineHeight: lineHeight,
+                y: y
+              ) else { return nil }
+
+        return (image, placement)
     }
 
     private func drawHighQualityImage(_ image: UIImage, in rect: CGRect) {
@@ -1955,14 +2031,6 @@ nonisolated struct BodyPDFExportService {
         context.interpolationQuality = .high
         image.draw(in: rect)
         context.restoreGState()
-    }
-
-    private func creatorImageBlockHeight(in layout: PageLayout) -> CGFloat {
-        creatorImageHeight(in: layout)
-    }
-
-    private func creatorImageHeight(in layout: PageLayout) -> CGFloat {
-        max(layout.fontSize * 2.4, 18)
     }
 
     private func drawVerticalColophonQRCode(_ colophon: ColophonSettings, columns: [String], in layout: PageLayout) {
