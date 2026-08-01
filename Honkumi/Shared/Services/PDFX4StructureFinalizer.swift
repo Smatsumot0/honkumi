@@ -94,12 +94,28 @@ nonisolated enum PDFX4StructureFinalizer {
     }
 
     static func finalizedData(from source: Data) throws -> Data {
+        try rebuild(source, metadata: nil)
+    }
+
+    static func finalizedData(
+        from source: Data,
+        metadata: PDFX4DocumentMetadata
+    ) throws -> Data {
+        try rebuild(source, metadata: metadata)
+    }
+
+    private static func rebuild(
+        _ source: Data,
+        metadata: PDFX4DocumentMetadata?
+    ) throws -> Data {
         let parsed = try structure(in: source, allowRepairableZeroOffsets: true)
         try PDFLexicalScanner.validateReferences(in: parsed)
         guard let originalInfoBody = parsed.objectBodies[parsed.infoReference] else {
             throw PDFX4FinalizationError.missingReference(parsed.infoReference)
         }
-        let infoBody = try PDFInfoDictionaryNormalizer.trappedFalse(in: originalInfoBody)
+        let infoBody = try metadata.map {
+            try PDFInfoDictionaryNormalizer.normalized(in: originalInfoBody, metadata: $0)
+        } ?? PDFInfoDictionaryNormalizer.trappedFalse(in: originalInfoBody)
 
         var output = try PDFSerialization.header(
             version: PDFPrintProduction.targetPDFVersion,
@@ -150,8 +166,22 @@ nonisolated enum PDFX4StructureFinalizer {
     }
 
     static func finalize(at url: URL) throws {
+        try finalize(at: url, metadata: nil)
+    }
+
+    static func finalize(
+        at url: URL,
+        metadata: PDFX4DocumentMetadata
+    ) throws {
+        try finalize(at: url, metadata: Optional(metadata))
+    }
+
+    private static func finalize(
+        at url: URL,
+        metadata: PDFX4DocumentMetadata?
+    ) throws {
         let source = try Data(contentsOf: url)
-        let output = try finalizedData(from: source)
+        let output = try rebuild(source, metadata: metadata)
 
         guard
             let provider = CGDataProvider(data: output as CFData),
@@ -1042,19 +1072,14 @@ nonisolated private enum PDFSerialization {
     }
 }
 
-nonisolated private enum PDFInfoDictionaryNormalizer {
+nonisolated enum PDFInfoDictionaryNormalizer {
+    private static let synchronizedNames: Set<String> = [
+        "Title", "Author", "Subject", "Keywords", "Creator", "Producer",
+        "CreationDate", "ModDate", "Trapped"
+    ]
+
     static func trappedFalse(in objectBody: Data) throws -> Data {
-        var cursor = PDFByteCursor(data: objectBody)
-        guard cursor.readInteger() != nil, cursor.readInteger() != nil, cursor.readKeyword("obj") else {
-            throw PDFX4FinalizationError.invalidInfoDictionary
-        }
-        cursor.skipWhitespaceAndComments()
-        let dictionaryStart = cursor.position
-        guard dictionaryStart + 1 < objectBody.count,
-              objectBody[dictionaryStart] == 60, objectBody[dictionaryStart + 1] == 60 else {
-            throw PDFX4FinalizationError.invalidInfoDictionary
-        }
-        let entries = try dictionaryEntries(in: objectBody, startingAt: dictionaryStart)
+        let entries = try parsedEntries(in: objectBody)
         let trappedEntries = entries.0.filter { $0.name == "Trapped" }
         guard trappedEntries.count <= 1 else {
             throw PDFX4FinalizationError.invalidInfoDictionary
@@ -1069,6 +1094,84 @@ nonisolated private enum PDFInfoDictionaryNormalizer {
         output.append(Data(" /Trapped /False".utf8))
         output.append(objectBody[entries.endStart..<objectBody.count])
         return output
+    }
+
+    static func normalized(
+        in objectBody: Data,
+        metadata: PDFX4DocumentMetadata
+    ) throws -> Data {
+        let entries = try parsedEntries(in: objectBody)
+        let synchronizedEntries = entries.0.filter { synchronizedNames.contains($0.name) }
+        let entryCounts = Dictionary(grouping: synchronizedEntries, by: \.name)
+        guard entryCounts.values.allSatisfy({ $0.count == 1 }) else {
+            throw PDFX4FinalizationError.invalidInfoDictionary
+        }
+
+        var replacements: [(name: String, value: Data)] = [
+            ("Title", pdfTextString(metadata.title)),
+            ("Subject", pdfTextString(metadata.subject)),
+            ("Keywords", pdfTextString(metadata.keywords)),
+            ("Creator", pdfTextString(metadata.creatorTool)),
+            ("Producer", pdfTextString(metadata.producer)),
+            ("CreationDate", pdfTextString(PDFX4DocumentMetadata.pdfDateString(metadata.creationDate))),
+            ("ModDate", pdfTextString(PDFX4DocumentMetadata.pdfDateString(metadata.modificationDate))),
+            ("Trapped", Data("/False".utf8))
+        ]
+        if let author = metadata.author {
+            replacements.insert(("Author", pdfTextString(author)), at: 1)
+        }
+
+        let entriesByName = Dictionary(uniqueKeysWithValues: synchronizedEntries.map {
+            ($0.name, $0)
+        })
+        var output = objectBody
+        let missingEntries = replacements.filter { entriesByName[$0.name] == nil }
+        if !missingEntries.isEmpty {
+            var insertion = Data()
+            for entry in missingEntries {
+                insertion.append(Data(" /\(entry.name) ".utf8))
+                insertion.append(entry.value)
+            }
+            output.insert(contentsOf: insertion, at: entries.endStart)
+        }
+
+        for replacement in replacements.compactMap({ replacement -> (Entry, Data)? in
+            entriesByName[replacement.name].map { ($0, replacement.value) }
+        }).sorted(by: { $0.0.valueStart > $1.0.valueStart }) {
+            output.replaceSubrange(
+                replacement.0.valueStart..<replacement.0.valueEnd,
+                with: replacement.1
+            )
+        }
+        return output
+    }
+
+    private static func parsedEntries(in objectBody: Data) throws -> ([Entry], endStart: Int) {
+        var cursor = PDFByteCursor(data: objectBody)
+        guard cursor.readInteger() != nil,
+              cursor.readInteger() != nil,
+              cursor.readKeyword("obj") else {
+            throw PDFX4FinalizationError.invalidInfoDictionary
+        }
+        cursor.skipWhitespaceAndComments()
+        let dictionaryStart = cursor.position
+        guard dictionaryStart + 1 < objectBody.count,
+              objectBody[dictionaryStart] == 60,
+              objectBody[dictionaryStart + 1] == 60 else {
+            throw PDFX4FinalizationError.invalidInfoDictionary
+        }
+        return try dictionaryEntries(in: objectBody, startingAt: dictionaryStart)
+    }
+
+    private static func pdfTextString(_ value: String) -> Data {
+        var bytes = Data([0xFE, 0xFF])
+        for codeUnit in value.utf16 {
+            bytes.append(UInt8(codeUnit >> 8))
+            bytes.append(UInt8(codeUnit & 0xFF))
+        }
+
+        let hexadecimal = bytes.map { String(format: "%02X", $0) }.joined()
+        return Data("<\(hexadecimal)>".utf8)
     }
 
     private static func dictionaryEntries(in data: Data, startingAt start: Int) throws -> ([Entry], endStart: Int) {

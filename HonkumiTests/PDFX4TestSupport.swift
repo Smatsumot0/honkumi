@@ -85,6 +85,8 @@ enum PDFTestFixtureBuilder {
 
     static func malformedQuartzStylePDF(
         trappedValue: String? = nil,
+        infoEntries: String = " /Title (Fixture)",
+        includeReadablePage: Bool = false,
         additionalTrailerEntries: String = "",
         catalogReference: String? = nil,
         additionalCatalogEntries: String = "",
@@ -103,17 +105,27 @@ enum PDFTestFixtureBuilder {
             1,
             "<< /Type /Catalog /Pages 2 0 R\(brokenReference)\(additionalCatalogEntries) >>\(catalogPostamble)"
         )
-        appendObject(2, "<< /Type /Pages /Count 0 /Kids [] >>")
+        appendObject(
+            2,
+            includeReadablePage
+                ? "<< /Type /Pages /Count 1 /Kids [4 0 R] >>"
+                : "<< /Type /Pages /Count 0 /Kids [] >>"
+        )
         let trapped = trappedValue.map { " /Trapped \($0)" } ?? ""
-        appendObject(3, "<< /Title (Fixture)\(trapped) >>")
+        appendObject(3, "<<\(infoEntries)\(trapped) >>")
+        if includeReadablePage {
+            appendObject(4, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>")
+        }
 
         let xrefOffset = data.count
         data.append(Data("xref\n0 5\n".utf8))
         data.append(Data("0000000000 65535 f \n".utf8))
-        for number in 1...3 {
+        for number in 1...(includeReadablePage ? 4 : 3) {
             data.append(Data(String(format: "%010d 00000 n \n", offsets[number]!).utf8))
         }
-        data.append(Data("0000000000 00000 n \n".utf8))
+        if !includeReadablePage {
+            data.append(Data("0000000000 00000 n \n".utf8))
+        }
         data.append(Data("""
         trailer
         << /Size 5 /Root 1 0 R /Info 3 0 R\(additionalTrailerEntries) >>
@@ -312,6 +324,25 @@ enum PDFX4TestInspector {
             unresolvedColorSpaceNames: unresolvedColorSpaceNames,
             embeddedBaseFontNames: embeddedBaseFontNames
         )
+    }
+
+    static func infoStrings(in data: Data) throws -> [String: String] {
+        guard
+            let provider = CGDataProvider(data: data as CFData),
+            let document = CGPDFDocument(provider)
+        else {
+            throw PDFX4TestInspectionError.unreadablePDF
+        }
+        guard let info = document.info else {
+            throw PDFX4TestInspectionError.missingInfo
+        }
+        let keys = [
+            "Title", "Author", "Subject", "Keywords", "Creator", "Producer",
+            "CreationDate", "ModDate"
+        ]
+        return Dictionary(uniqueKeysWithValues: keys.compactMap { key in
+            string(in: info, key: key).map { (key, $0) }
+        })
     }
 
     static func infoObjectBody(in data: Data) throws -> Data {
