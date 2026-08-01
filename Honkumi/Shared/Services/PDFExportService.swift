@@ -2306,8 +2306,9 @@ nonisolated struct BodyPDFExportService {
             attributes[.font] = AppFontCatalog.pdfTableOfContentsPageNumberUIFont(
                 pageNumberFontId: layout.settings.pageNumberFontId,
                 bodyFontId: layout.settings.selectedFontId,
-                bodyFontSize: layout.fontSize,
-                glyphScale: glyph.fontScale,
+                size: layout.effectiveTableOfContentsPageNumberFontSize(
+                    isPageNumberFontUnlocked: isAdditionalFontPackUnlocked
+                ),
                 isPageNumberFontUnlocked: isAdditionalFontPackUnlocked
             )
         }

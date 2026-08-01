@@ -38,6 +38,7 @@ nonisolated extension EditorSettings {
             applied.isPageNumberEnabled = defaults.isPageNumberEnabled
             applied.pageNumberFontId = defaults.pageNumberFontId
             applied.pageNumberSize = defaults.pageNumberSize
+            applied.tableOfContentsPageNumberSize = defaults.tableOfContentsPageNumberSize
             applied.pageNumberStart = defaults.pageNumberStart
             applied.pageNumberPosition = defaults.pageNumberPosition
             applied.showPageNumberOnToc = defaults.showPageNumberOnToc

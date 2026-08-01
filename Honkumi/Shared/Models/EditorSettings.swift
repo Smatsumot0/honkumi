@@ -13,6 +13,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
     static let characterSpacingRange: ClosedRange<CGFloat> = 0...4
     static let maxConsecutiveBlankLinesRange: ClosedRange<Int> = 0...5
     static let pageNumberSizeRange: ClosedRange<CGFloat> = 6...18
+    static let tableOfContentsPageNumberSizeRange: ClosedRange<CGFloat> = 6...18
     static let pageNumberStartRange: ClosedRange<Int> = 1...9999
     static let editorFontSizeRange: ClosedRange<CGFloat> = 7...20
 
@@ -36,6 +37,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
     var isPageNumberEnabled: Bool
     var pageNumberFontId: String?
     var pageNumberSize: CGFloat
+    var tableOfContentsPageNumberSize: CGFloat
     var pageNumberStart: Int
     var pageNumberPosition: PageNumberPosition
     var showPageNumberOnToc: Bool
@@ -78,6 +80,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
         isPageNumberEnabled: Bool,
         pageNumberFontId: String?,
         pageNumberSize: CGFloat,
+        tableOfContentsPageNumberSize: CGFloat = 9,
         pageNumberStart: Int = 1,
         pageNumberPosition: PageNumberPosition,
         showPageNumberOnToc: Bool = true,
@@ -109,6 +112,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
         self.isPageNumberEnabled = isPageNumberEnabled
         self.pageNumberFontId = pageNumberFontId
         self.pageNumberSize = pageNumberSize
+        self.tableOfContentsPageNumberSize = tableOfContentsPageNumberSize
         self.pageNumberStart = pageNumberStart
         self.pageNumberPosition = pageNumberPosition
         self.showPageNumberOnToc = showPageNumberOnToc
@@ -142,6 +146,7 @@ nonisolated struct EditorSettings: Codable, Equatable {
         isPageNumberEnabled: true,
         pageNumberFontId: nil,
         pageNumberSize: 7,
+        tableOfContentsPageNumberSize: 9,
         pageNumberStart: 1,
         pageNumberPosition: .outside,
         showPageNumberOnToc: true,
@@ -176,6 +181,9 @@ nonisolated struct EditorSettings: Codable, Equatable {
             isPageNumberEnabled: isPageNumberEnabled,
             pageNumberFontId: pageNumberFontId,
             pageNumberSize: pageNumberSize.clamped(to: Self.pageNumberSizeRange),
+            tableOfContentsPageNumberSize: tableOfContentsPageNumberSize.clamped(
+                to: Self.tableOfContentsPageNumberSizeRange
+            ),
             pageNumberStart: pageNumberStart.clamped(to: Self.pageNumberStartRange),
             pageNumberPosition: pageNumberPosition,
             showPageNumberOnToc: showPageNumberOnToc,
@@ -213,6 +221,7 @@ nonisolated extension EditorSettings {
         case isPageNumberEnabled
         case pageNumberFontId
         case pageNumberSize
+        case tableOfContentsPageNumberSize
         case pageNumberStart
         case pageNumberPosition
         case showPageNumberOnToc
@@ -241,6 +250,12 @@ nonisolated extension EditorSettings {
             )
         let decodedEditorFontId = try container.decodeIfPresent(String.self, forKey: .editorFontId)
             ?? decodedSelectedFontId
+        let decodedFontSize = try container.decodeIfPresent(CGFloat.self, forKey: .fontSize)
+            ?? defaults.fontSize
+        let decodedTableOfContentsPageNumberSize = try container.decodeIfPresent(
+            CGFloat.self,
+            forKey: .tableOfContentsPageNumberSize
+        ) ?? decodedFontSize.clamped(to: Self.tableOfContentsPageNumberSizeRange)
 
         let decodedPageNumberPosition = try container.decodeIfPresent(PageNumberPosition.self, forKey: .pageNumberPosition)
             ?? defaults.pageNumberPosition
@@ -263,7 +278,7 @@ nonisolated extension EditorSettings {
         self.init(
             pageSize: try container.decodeIfPresent(PageSize.self, forKey: .pageSize) ?? defaults.pageSize,
             selectedFontId: AppFontCatalog.normalizedFontId(decodedSelectedFontId),
-            fontSize: try container.decodeIfPresent(CGFloat.self, forKey: .fontSize) ?? defaults.fontSize,
+            fontSize: decodedFontSize,
             editorFontId: AppFontCatalog.normalizedFontId(decodedEditorFontId),
             editorFontSize: try container.decodeIfPresent(CGFloat.self, forKey: .editorFontSize) ?? defaults.editorFontSize,
             lineSpacing: try container.decodeIfPresent(CGFloat.self, forKey: .lineSpacing) ?? defaults.lineSpacing,
@@ -277,6 +292,7 @@ nonisolated extension EditorSettings {
             isPageNumberEnabled: decodedIsPageNumberEnabled,
             pageNumberFontId: try container.decodeIfPresent(String.self, forKey: .pageNumberFontId),
             pageNumberSize: try container.decodeIfPresent(CGFloat.self, forKey: .pageNumberSize) ?? defaults.pageNumberSize,
+            tableOfContentsPageNumberSize: decodedTableOfContentsPageNumberSize,
             pageNumberStart: try container.decodeIfPresent(Int.self, forKey: .pageNumberStart) ?? defaults.pageNumberStart,
             pageNumberPosition: decodedPageNumberPosition,
             showPageNumberOnToc: try container.decodeIfPresent(Bool.self, forKey: .showPageNumberOnToc) ?? true,
@@ -312,6 +328,10 @@ nonisolated extension EditorSettings {
         try container.encode(isPageNumberEnabled, forKey: .isPageNumberEnabled)
         try container.encodeIfPresent(pageNumberFontId, forKey: .pageNumberFontId)
         try container.encode(pageNumberSize, forKey: .pageNumberSize)
+        try container.encode(
+            tableOfContentsPageNumberSize,
+            forKey: .tableOfContentsPageNumberSize
+        )
         try container.encode(pageNumberStart, forKey: .pageNumberStart)
         try container.encode(pageNumberPosition, forKey: .pageNumberPosition)
         try container.encode(showPageNumberOnToc, forKey: .showPageNumberOnToc)

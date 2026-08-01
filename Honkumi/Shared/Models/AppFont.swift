@@ -63,7 +63,7 @@ nonisolated struct PageNumberFont: Identifiable, Equatable {
     let licenseName: String
     let copyrightText: String
 
-    /// Multiplier for UI previews. PDF output uses explicit point-size adjustments below.
+    /// Multiplier for UI previews. PDF output uses explicit requested point sizes.
     let sizeMultiplier: CGFloat
     let usesDotLeaderInTableOfContents: Bool
 
@@ -92,36 +92,20 @@ nonisolated struct PageNumberFont: Identifiable, Equatable {
 
 nonisolated struct PDFBodyFontSizeAdjustment: Equatable {
     let tableOfContentsDelta: CGFloat
-    let pageNumberDelta: CGFloat
     let exclamationQuestionDelta: CGFloat
     let longVowelDelta: CGFloat
     let longVowelYOffset: CGFloat
 
     init(
         tableOfContentsDelta: CGFloat = 0,
-        pageNumberDelta: CGFloat = 0,
         exclamationQuestionDelta: CGFloat = 0,
         longVowelDelta: CGFloat = 0,
         longVowelYOffset: CGFloat = 0
     ) {
         self.tableOfContentsDelta = tableOfContentsDelta
-        self.pageNumberDelta = pageNumberDelta
         self.exclamationQuestionDelta = exclamationQuestionDelta
         self.longVowelDelta = longVowelDelta
         self.longVowelYOffset = longVowelYOffset
-    }
-}
-
-nonisolated struct PDFPageNumberFontSizeAdjustment: Equatable {
-    let tableOfContentsDelta: CGFloat
-    let pageNumberDelta: CGFloat
-
-    init(
-        tableOfContentsDelta: CGFloat = 0,
-        pageNumberDelta: CGFloat = 0
-    ) {
-        self.tableOfContentsDelta = tableOfContentsDelta
-        self.pageNumberDelta = pageNumberDelta
     }
 }
 
@@ -138,60 +122,21 @@ nonisolated enum AppFontCatalog {
     private static let bodyPDFFontSizeAdjustments: [String: PDFBodyFontSizeAdjustment] = [
         defaultFontId: PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 3,
-            pageNumberDelta: -2,
             exclamationQuestionDelta: 1
         ),
         "biz-ud-gothic": PDFBodyFontSizeAdjustment(
-            tableOfContentsDelta: 2,
-            pageNumberDelta: -2
+            tableOfContentsDelta: 2
         ),
         "m-plus-1": PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 2,
-            pageNumberDelta: -2,
             exclamationQuestionDelta: 1
         ),
         "zen-old-mincho": PDFBodyFontSizeAdjustment(
             tableOfContentsDelta: 2,
-            pageNumberDelta: -2,
             longVowelYOffset: 72 / 25.4
         ),
         "shippori-mincho": PDFBodyFontSizeAdjustment(
-            tableOfContentsDelta: 2,
-            pageNumberDelta: -2
-        )
-    ]
-    private static let pageNumberPDFFontSizeAdjustments: [String: PDFPageNumberFontSizeAdjustment] = [
-        "caveat": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 7,
-            pageNumberDelta: -4
-        ),
-        "cherry-bomb-one": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 3,
-            pageNumberDelta: -5
-        ),
-        "dancing-script": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 3,
-            pageNumberDelta: -7
-        ),
-        "great-vibes": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 6,
-            pageNumberDelta: -4
-        ),
-        "hachi-maru-pop": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 2,
-            pageNumberDelta: -6
-        ),
-        "homemade-apple": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 6,
-            pageNumberDelta: -4
-        ),
-        "love-light": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 6,
-            pageNumberDelta: -3
-        ),
-        "pacifico": PDFPageNumberFontSizeAdjustment(
-            tableOfContentsDelta: 6,
-            pageNumberDelta: -4
+            tableOfContentsDelta: 2
         )
     ]
 
@@ -365,14 +310,6 @@ nonisolated enum AppFontCatalog {
         bodyPDFFontSizeAdjustments[normalizedFontId(selectedFontId)] ?? PDFBodyFontSizeAdjustment()
     }
 
-    static func pageNumberPDFFontSizeAdjustment(pageNumberFontId: String?) -> PDFPageNumberFontSizeAdjustment {
-        guard let pageNumberFont = pageNumberFont(id: pageNumberFontId) else {
-            return PDFPageNumberFontSizeAdjustment()
-        }
-
-        return pageNumberPDFFontSizeAdjustments[pageNumberFont.id] ?? PDFPageNumberFontSizeAdjustment()
-    }
-
     static func pdfTableOfContentsBodyFontSize(
         selectedFontId: String,
         baseSize: CGFloat
@@ -420,34 +357,12 @@ nonisolated enum AppFontCatalog {
         return CGSize(width: 0, height: adjustment.longVowelYOffset)
     }
 
-    static func pdfPageNumberFontSize(
-        pageNumberFontId: String?,
-        bodyFontId: String,
-        baseSize: CGFloat,
-        isPageNumberFontUnlocked: Bool
-    ) -> CGFloat {
-        let delta = if isPageNumberFontUnlocked, pageNumberFont(id: pageNumberFontId) != nil {
-            pageNumberPDFFontSizeAdjustment(pageNumberFontId: pageNumberFontId).pageNumberDelta
-        } else {
-            bodyPDFFontSizeAdjustment(selectedFontId: bodyFontId).pageNumberDelta
-        }
-        return max(baseSize + delta, 6)
+    static func pdfPageNumberFontSize(baseSize: CGFloat) -> CGFloat {
+        max(baseSize, 6)
     }
 
-    static func pdfTableOfContentsPageNumberFontSize(
-        pageNumberFontId: String?,
-        bodyFontId: String,
-        baseSize: CGFloat,
-        glyphScale: CGFloat,
-        isPageNumberFontUnlocked: Bool
-    ) -> CGFloat {
-        let scaledSize = baseSize * glyphScale
-        let delta = if isPageNumberFontUnlocked, pageNumberFont(id: pageNumberFontId) != nil {
-            pageNumberPDFFontSizeAdjustment(pageNumberFontId: pageNumberFontId).tableOfContentsDelta
-        } else {
-            bodyPDFFontSizeAdjustment(selectedFontId: bodyFontId).tableOfContentsDelta
-        }
-        return max(scaledSize + delta, 1)
+    static func pdfTableOfContentsPageNumberFontSize(baseSize: CGFloat) -> CGFloat {
+        max(baseSize, 1)
     }
 
     static func pdfPageNumberUIFont(
@@ -456,12 +371,7 @@ nonisolated enum AppFontCatalog {
         size: CGFloat,
         isPageNumberFontUnlocked: Bool
     ) -> UIFont {
-        let adjustedSize = pdfPageNumberFontSize(
-            pageNumberFontId: pageNumberFontId,
-            bodyFontId: bodyFontId,
-            baseSize: size,
-            isPageNumberFontUnlocked: isPageNumberFontUnlocked
-        )
+        let adjustedSize = pdfPageNumberFontSize(baseSize: size)
         guard isPageNumberFontUnlocked,
               let pageNumberFont = pageNumberFont(id: pageNumberFontId),
               let uiFont = cachedUIFont(name: pageNumberFont.postScriptName, size: adjustedSize) else {
@@ -478,17 +388,10 @@ nonisolated enum AppFontCatalog {
     static func pdfTableOfContentsPageNumberUIFont(
         pageNumberFontId: String?,
         bodyFontId: String,
-        bodyFontSize: CGFloat,
-        glyphScale: CGFloat,
+        size: CGFloat,
         isPageNumberFontUnlocked: Bool
     ) -> UIFont {
-        let adjustedSize = pdfTableOfContentsPageNumberFontSize(
-            pageNumberFontId: pageNumberFontId,
-            bodyFontId: bodyFontId,
-            baseSize: bodyFontSize,
-            glyphScale: glyphScale,
-            isPageNumberFontUnlocked: isPageNumberFontUnlocked
-        )
+        let adjustedSize = pdfTableOfContentsPageNumberFontSize(baseSize: size)
         guard isPageNumberFontUnlocked,
               let pageNumberFont = pageNumberFont(id: pageNumberFontId),
               let uiFont = cachedUIFont(name: pageNumberFont.postScriptName, size: adjustedSize) else {

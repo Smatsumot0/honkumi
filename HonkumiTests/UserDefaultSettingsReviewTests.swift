@@ -232,6 +232,7 @@ final class UserDefaultSettingsReviewTests: XCTestCase {
         defaults.isPageNumberEnabled = false
         defaults.pageNumberFontId = "love-light"
         defaults.pageNumberSize = 11
+        defaults.tableOfContentsPageNumberSize = 12.5
         defaults.pageNumberStart = 3
         defaults.pageNumberPosition = .center
         defaults.showPageNumberOnToc = false
@@ -277,6 +278,7 @@ final class UserDefaultSettingsReviewTests: XCTestCase {
         XCTAssertFalse(store.document.settings.isPageNumberEnabled)
         XCTAssertEqual(store.document.settings.pageNumberFontId, "love-light")
         XCTAssertEqual(store.document.settings.pageNumberSize, 11)
+        XCTAssertEqual(store.document.settings.tableOfContentsPageNumberSize, 12.5)
         XCTAssertEqual(store.document.settings.pageNumberStart, 3)
         XCTAssertEqual(store.document.settings.pageNumberPosition, .center)
         XCTAssertFalse(store.document.settings.showPageNumberOnToc)

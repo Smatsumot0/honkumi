@@ -57,7 +57,46 @@ final class SettingsPrintSnapshotTests: XCTestCase {
         XCTAssertFalse(viewModel.isCalculatingPrintSettings)
     }
 
-    private func makeStore(document: ManuscriptDocument) -> DocumentStore {
+    func testTableOfContentsPageNumberSizeControlTracksOutputAndUpdatesPaidSetting() {
+        let store = makeStore(
+            document: ManuscriptDocument(title: "Print", body: "本文"),
+            subscriptionStatus: .paid
+        )
+        let viewModel = SettingsViewModel(documentStore: store)
+
+        XCTAssertFalse(viewModel.showsTableOfContentsPageNumberSizeSetting)
+
+        viewModel.updateShowTableOfContents(true)
+
+        XCTAssertTrue(viewModel.showsTableOfContentsPageNumberSizeSetting)
+        var expected = viewModel.settings
+        expected.tableOfContentsPageNumberSize = 10.5
+
+        viewModel.updateTableOfContentsPageNumberSize(10.5)
+
+        XCTAssertEqual(viewModel.settings, expected)
+    }
+
+    func testFreeUserCannotChangeTableOfContentsPageNumberSize() {
+        let store = makeStore(
+            document: ManuscriptDocument(title: "Print", body: "本文"),
+            subscriptionStatus: .free
+        )
+        let viewModel = SettingsViewModel(documentStore: store)
+        let originalSize = viewModel.settings.tableOfContentsPageNumberSize
+
+        viewModel.updateTableOfContentsPageNumberSize(10.5)
+
+        XCTAssertEqual(
+            viewModel.settings.tableOfContentsPageNumberSize,
+            originalSize
+        )
+    }
+
+    private func makeStore(
+        document: ManuscriptDocument,
+        subscriptionStatus: SubscriptionStatus = .free
+    ) -> DocumentStore {
         DocumentStore(
             appData: AppData(
                 version: AppData.currentVersion,
@@ -65,7 +104,7 @@ final class SettingsPrintSnapshotTests: XCTestCase {
                 works: [document],
                 userDefaultSettings: .default,
                 activeWorkId: document.id,
-                subscriptionStatus: .free
+                subscriptionStatus: subscriptionStatus
             )
         )
     }

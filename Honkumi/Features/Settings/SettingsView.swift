@@ -273,6 +273,18 @@ struct SettingsView: View {
                     get: { viewModel.settings.showTableOfContents },
                     set: { viewModel.updateShowTableOfContents($0) }
                 ))
+
+                if viewModel.showsTableOfContentsPageNumberSizeSetting {
+                    valueStepper(
+                        title: "目次ページ番号サイズ",
+                        value: viewModel.settings.tableOfContentsPageNumberSize,
+                        range: EditorSettings.tableOfContentsPageNumberSizeRange,
+                        step: 0.5,
+                        format: "%.1f pt",
+                        update: viewModel.updateTableOfContentsPageNumberSize
+                    )
+                    .disabled(!viewModel.isPageNumberFontUnlocked)
+                }
             }
 
             Section("奥付") {

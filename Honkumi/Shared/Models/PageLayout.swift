@@ -35,6 +35,16 @@ nonisolated struct PageLayout: Equatable {
         return max(EditorSettings.default.pageNumberSize, 6)
     }
 
+    func effectiveTableOfContentsPageNumberFontSize(
+        isPageNumberFontUnlocked: Bool
+    ) -> CGFloat {
+        if isPageNumberFontUnlocked {
+            return max(settings.tableOfContentsPageNumberSize, 6)
+        }
+
+        return max(EditorSettings.default.tableOfContentsPageNumberSize, 6)
+    }
+
     func pageNumberOrigin(textSize: CGSize, isPageNumberFontUnlocked: Bool) -> CGPoint {
         switch effectivePageNumberPosition(isPageNumberFontUnlocked: isPageNumberFontUnlocked) {
         case .hidden:

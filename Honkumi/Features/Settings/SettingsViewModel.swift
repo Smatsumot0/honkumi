@@ -124,6 +124,10 @@ final class SettingsViewModel: ObservableObject {
         isPremiumUser
     }
 
+    var showsTableOfContentsPageNumberSizeSetting: Bool {
+        settings.showTableOfContents
+    }
+
     var isActiveWorkScope: Bool {
         scope == .activeWork
     }
@@ -376,6 +380,13 @@ final class SettingsViewModel: ObservableObject {
         guard isPageNumberFontUnlocked else { return }
         var updated = settings
         updated.pageNumberSize = value
+        settings = updated
+    }
+
+    func updateTableOfContentsPageNumberSize(_ value: CGFloat) {
+        guard isPageNumberFontUnlocked else { return }
+        var updated = settings
+        updated.tableOfContentsPageNumberSize = value
         settings = updated
     }
 
