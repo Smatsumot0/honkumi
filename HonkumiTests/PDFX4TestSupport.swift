@@ -185,8 +185,12 @@ enum PDFTestFixtureBuilder {
 struct PDFX4SemanticSnapshot {
     let version: String
     let trappedName: String
+    let outputIntentCount: Int
     let outputIntentSubtype: String
     let outputConditionIdentifier: String
+    let registryName: String
+    let outputCondition: String
+    let outputIntentInfo: String
     let catalogVersion: String?
     let iccComponentCount: Int
     let iccData: Data
@@ -274,8 +278,11 @@ enum PDFX4TestInspector {
 
         var outputIntents: CGPDFArrayRef?
         guard CGPDFDictionaryGetArray(catalog, "OutputIntents", &outputIntents),
-              let outputIntents,
-              CGPDFArrayGetCount(outputIntents) == 1 else {
+              let outputIntents else {
+            throw PDFX4TestInspectionError.missingValue("OutputIntents")
+        }
+        let outputIntentCount = CGPDFArrayGetCount(outputIntents)
+        guard outputIntentCount == 1 else {
             throw PDFX4TestInspectionError.missingValue("OutputIntents")
         }
         var outputIntent: CGPDFDictionaryRef?
@@ -287,6 +294,9 @@ enum PDFX4TestInspector {
             in: outputIntent,
             key: "OutputConditionIdentifier"
         )
+        let registryName = try requiredString(in: outputIntent, key: "RegistryName")
+        let outputCondition = string(in: outputIntent, key: "OutputCondition") ?? ""
+        let outputIntentInfo = string(in: outputIntent, key: "Info") ?? ""
 
         var iccStream: CGPDFStreamRef?
         guard CGPDFDictionaryGetStream(outputIntent, "DestOutputProfile", &iccStream),
@@ -369,8 +379,12 @@ enum PDFX4TestInspector {
         return PDFX4SemanticSnapshot(
             version: "\(majorVersion).\(minorVersion)",
             trappedName: trappedName,
+            outputIntentCount: outputIntentCount,
             outputIntentSubtype: outputIntentSubtype,
             outputConditionIdentifier: outputConditionIdentifier,
+            registryName: registryName,
+            outputCondition: outputCondition,
+            outputIntentInfo: outputIntentInfo,
             catalogVersion: name(in: catalog, key: "Version"),
             iccComponentCount: Int(componentCount),
             iccData: iccData,
@@ -414,13 +428,27 @@ enum PDFX4TestInspector {
         guard let info = document.info else {
             throw PDFX4TestInspectionError.missingInfo
         }
-        let keys = [
-            "Title", "Author", "Subject", "Keywords", "Creator", "Producer",
-            "CreationDate", "ModDate"
-        ]
-        return Dictionary(uniqueKeysWithValues: keys.compactMap { key in
-            string(in: info, key: key).map { (key, $0) }
+        return Dictionary(uniqueKeysWithValues: entries(in: info).compactMap { key, object in
+            string(from: object).map { (key, $0) }
         })
+    }
+
+    static func xmpData(in data: Data) throws -> Data {
+        guard
+            let provider = CGDataProvider(data: data as CFData),
+            let document = CGPDFDocument(provider)
+        else {
+            throw PDFX4TestInspectionError.unreadablePDF
+        }
+        guard let catalog = document.catalog else {
+            throw PDFX4TestInspectionError.missingCatalog
+        }
+        var metadataStream: CGPDFStreamRef?
+        guard CGPDFDictionaryGetStream(catalog, "Metadata", &metadataStream),
+              let metadataStream else {
+            throw PDFX4TestInspectionError.missingValue("Metadata")
+        }
+        return try decodedData(from: metadataStream, label: "Metadata")
     }
 
     static func infoObjectBody(in data: Data) throws -> Data {
@@ -1045,6 +1073,16 @@ enum PDFX4TestInspector {
             return nil
         }
         return String(cString: pointer)
+    }
+
+    private static func string(from object: CGPDFObjectRef) -> String? {
+        var value: CGPDFStringRef?
+        guard CGPDFObjectGetValue(object, .string, &value),
+              let value,
+              let text = CGPDFStringCopyTextString(value) else {
+            return nil
+        }
+        return text as String
     }
 
     private static func dictionary(from object: CGPDFObjectRef) -> CGPDFDictionaryRef? {

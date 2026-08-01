@@ -72,6 +72,46 @@ final class PDFX4GeneratedPDFTests: XCTestCase {
         }
     }
 
+    // Catches colophon identity and contact values being copied into document metadata.
+    // The rendered colophon may legitimately contain these values, so inspect only Info and XMP.
+    func testEnabledColophonValuesRemainAbsentFromInfoAndXMP() throws {
+        let author = "private-author-7E1D6FC8"
+        let circle = "private-circle-2A79B4E5"
+        let contact = "private-contact-81C3@example.invalid"
+        let url = "https://private.example.invalid/4D98B2A7"
+        var document = ManuscriptDocument(title: "Metadata privacy", body: "本文")
+        document.settings.colophon.isEnabled = true
+        document.settings.colophon.authorName = author
+        document.settings.colophon.circleName = circle
+        document.settings.colophon.contact = contact
+        document.settings.colophon.websiteURL = url
+        document.settings.colophon.showsAuthorName = true
+        document.settings.colophon.showsCircleName = true
+        document.settings.colophon.showsWebsiteURL = true
+
+        let exportedURL = try BodyPDFExportService().export(
+            document: document,
+            subscriptionStatus: .free
+        )
+        defer { try? FileManager.default.removeItem(at: exportedURL) }
+        let data = try Data(contentsOf: exportedURL)
+
+        let semantic = try PDFX4TestInspector.inspect(data)
+        XCTAssertNil(semantic.infoAuthor)
+        XCTAssertEqual(semantic.xmpCreatorCount, 0)
+
+        let xmpText = try XCTUnwrap(
+            String(data: PDFX4TestInspector.xmpData(in: data), encoding: .utf8)
+        )
+        for secret in [author, circle, contact, url] {
+            XCTAssertFalse(xmpText.contains(secret))
+        }
+        let infoValues = try PDFX4TestInspector.infoStrings(in: data)
+        for secret in [author, circle, contact, url] {
+            XCTAssertFalse(infoValues.values.contains(secret))
+        }
+    }
+
     private func assertRequiredStructure(at url: URL, label: String) throws {
         let data = try Data(contentsOf: url)
         let structure = try PDFX4StructureFinalizer.structure(in: data)
@@ -105,8 +145,14 @@ final class PDFX4GeneratedPDFTests: XCTestCase {
             label
         )
         XCTAssertEqual(semantic.trappedName, "False", label)
+        XCTAssertEqual(semantic.outputIntentCount, 1, label)
         XCTAssertEqual(semantic.outputIntentSubtype, "GTS_PDFX", label)
         XCTAssertFalse(semantic.outputConditionIdentifier.isEmpty, label)
+        XCTAssertFalse(semantic.registryName.isEmpty, label)
+        XCTAssertFalse(
+            semantic.outputCondition.isEmpty && semantic.outputIntentInfo.isEmpty,
+            label
+        )
         XCTAssertEqual(semantic.iccComponentCount, 4, label)
         XCTAssertFalse(semantic.iccData.isEmpty, label)
         XCTAssertEqual(semantic.iccData.subdata(in: 36..<40), Data("acsp".utf8), label)

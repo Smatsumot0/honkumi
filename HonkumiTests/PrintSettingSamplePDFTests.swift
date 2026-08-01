@@ -65,6 +65,65 @@ final class PrintSettingSamplePDFTests: XCTestCase {
         }
     }
 
+    // Catches metadata finalization changing page geometry, content, text, pixels, or
+    // any non-Info object in production-size PDFs whose crop marks are actually enabled.
+    func testPDFX4MetadataFinalizationPreservesCropMarkedProductionSizes() throws {
+        let representativeSamples = PageSize.selectableCases.compactMap { pageSize in
+            PrintSettingSampleManifest.recommendedSettingCases().first {
+                $0.document.settings.pageSize == pageSize
+                    && $0.pageBand == .pages1Through48
+            }
+        }
+
+        XCTAssertEqual(representativeSamples.count, PageSize.selectableCases.count)
+        XCTAssertEqual(
+            Set(representativeSamples.map(\.document.settings.pageSize)),
+            Set(PageSize.selectableCases)
+        )
+
+        for sample in representativeSamples {
+            var document = sample.document
+            document.settings.showsCropMarks = true
+            let pageSize = document.settings.pageSize
+            let finalizer = CapturingPDFX4Finalizer()
+            let exportedURL = try BodyPDFExportService(finalizer: finalizer).export(
+                document: document,
+                subscriptionStatus: .free
+            )
+            defer { try? FileManager.default.removeItem(at: exportedURL) }
+
+            let sourceData = finalizer.sourceData
+            let finalData = finalizer.finalData
+            XCTAssertEqual(sourceData.count, 1, pageSize.displayName)
+            XCTAssertEqual(finalData.count, 1, pageSize.displayName)
+            let capture = (
+                beforeData: try XCTUnwrap(sourceData.first, pageSize.displayName),
+                afterData: try XCTUnwrap(finalData.first, pageSize.displayName)
+            )
+            let beforeSnapshots = try PDFPageRegressionInspector.snapshots(
+                from: capture.beforeData
+            )
+            XCTAssertFalse(beforeSnapshots.isEmpty, pageSize.displayName)
+            let firstPage = try XCTUnwrap(beforeSnapshots.first, pageSize.displayName)
+            XCTAssertNotEqual(firstPage.trimBox, firstPage.mediaBox, pageSize.displayName)
+
+            XCTAssertEqual(
+                beforeSnapshots,
+                try PDFPageRegressionInspector.snapshots(from: capture.afterData),
+                pageSize.displayName
+            )
+            try PDFX4TestInspector.assertNonInfoObjectBodiesEqual(
+                before: capture.beforeData,
+                after: capture.afterData,
+                context: pageSize.displayName
+            )
+            try persistCropMarkArtifactIfRequested(
+                capture.afterData,
+                pageSize: pageSize
+            )
+        }
+    }
+
     func testFontSamplePDFContainsNormalizedTextWithoutCross() throws {
         let sample = try XCTUnwrap(
             PrintSettingSampleManifest.fontSizeCases().first {
@@ -126,6 +185,35 @@ final class PrintSettingSamplePDFTests: XCTestCase {
             after: after,
             context: context
         )
+    }
+
+    private func persistCropMarkArtifactIfRequested(
+        _ data: Data,
+        pageSize: PageSize
+    ) throws {
+        guard let directory = ProcessInfo.processInfo.environment[
+            "HONKUMI_PDF_X4_ARTIFACT_DIR"
+        ] else {
+            return
+        }
+        let directoryURL = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        let fileName: String
+        switch pageSize {
+        case .a6:
+            fileName = "A6-cropmarks.pdf"
+        case .b6:
+            fileName = "B6-cropmarks.pdf"
+        case .shinsho:
+            fileName = "Shinsho-cropmarks.pdf"
+        case .a5, .b5:
+            XCTFail("Unexpected non-production page size: \(pageSize.displayName)")
+            return
+        }
+        try data.write(to: directoryURL.appendingPathComponent(fileName), options: .atomic)
     }
 
     private func assertRequiredLayoutInvariants(for sample: PrintSettingSampleCase) {
