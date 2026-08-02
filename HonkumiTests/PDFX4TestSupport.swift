@@ -231,12 +231,36 @@ enum PDFX4TestInspectionError: Error, Equatable {
     case missingValue(String)
     case invalidICCProfile
     case invalidXMP
+    case invalidPDFString(String)
     case missingEmbeddedFont(String)
 }
 
 enum PDFX4TestInspector {
     static func inspectXMP(_ data: Data) throws -> PDFXMPTestSnapshot {
         try xmpSnapshot(from: data)
+    }
+
+    static func inspectXMPStrings(_ data: Data) throws -> [String] {
+        let delegate = PDFXMLStringCollector()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        guard parser.parse() else {
+            throw PDFX4TestInspectionError.invalidXMP
+        }
+        return delegate.values
+    }
+
+    static func outputIntentCount(in data: Data) throws -> Int {
+        guard
+            let provider = CGDataProvider(data: data as CFData),
+            let document = CGPDFDocument(provider)
+        else {
+            throw PDFX4TestInspectionError.unreadablePDF
+        }
+        guard let catalog = document.catalog else {
+            throw PDFX4TestInspectionError.missingCatalog
+        }
+        return CGPDFArrayGetCount(try requiredOutputIntents(in: catalog))
     }
 
     static func inspect(_ data: Data) throws -> PDFX4SemanticSnapshot {
@@ -276,15 +300,8 @@ enum PDFX4TestInspector {
             key: "ModDate"
         )
 
-        var outputIntents: CGPDFArrayRef?
-        guard CGPDFDictionaryGetArray(catalog, "OutputIntents", &outputIntents),
-              let outputIntents else {
-            throw PDFX4TestInspectionError.missingValue("OutputIntents")
-        }
+        let outputIntents = try requiredOutputIntents(in: catalog)
         let outputIntentCount = CGPDFArrayGetCount(outputIntents)
-        guard outputIntentCount == 1 else {
-            throw PDFX4TestInspectionError.missingValue("OutputIntents")
-        }
         var outputIntent: CGPDFDictionaryRef?
         guard CGPDFArrayGetDictionary(outputIntents, 0, &outputIntent), let outputIntent else {
             throw PDFX4TestInspectionError.missingValue("OutputIntent")
@@ -428,9 +445,13 @@ enum PDFX4TestInspector {
         guard let info = document.info else {
             throw PDFX4TestInspectionError.missingInfo
         }
-        return Dictionary(uniqueKeysWithValues: entries(in: info).compactMap { key, object in
-            string(from: object).map { (key, $0) }
-        })
+        var values: [String: String] = [:]
+        for (key, object) in entries(in: info) {
+            if let value = try string(from: object, label: "Info.\(key)") {
+                values[key] = value
+            }
+        }
+        return values
     }
 
     static func xmpData(in data: Data) throws -> Data {
@@ -449,6 +470,10 @@ enum PDFX4TestInspector {
             throw PDFX4TestInspectionError.missingValue("Metadata")
         }
         return try decodedData(from: metadataStream, label: "Metadata")
+    }
+
+    static func xmpStrings(in data: Data) throws -> [String] {
+        try inspectXMPStrings(xmpData(in: data))
     }
 
     static func infoObjectBody(in data: Data) throws -> Data {
@@ -994,6 +1019,18 @@ enum PDFX4TestInspector {
         return value
     }
 
+    private static func requiredOutputIntents(
+        in catalog: CGPDFDictionaryRef
+    ) throws -> CGPDFArrayRef {
+        var outputIntents: CGPDFArrayRef?
+        guard CGPDFDictionaryGetArray(catalog, "OutputIntents", &outputIntents),
+              let outputIntents,
+              CGPDFArrayGetCount(outputIntents) > 0 else {
+            throw PDFX4TestInspectionError.missingValue("OutputIntents")
+        }
+        return outputIntents
+    }
+
     private static func requiredString(
         in dictionary: CGPDFDictionaryRef,
         key: String
@@ -1075,12 +1112,18 @@ enum PDFX4TestInspector {
         return String(cString: pointer)
     }
 
-    private static func string(from object: CGPDFObjectRef) -> String? {
+    private static func string(
+        from object: CGPDFObjectRef,
+        label: String
+    ) throws -> String? {
+        guard CGPDFObjectGetType(object) == .string else {
+            return nil
+        }
         var value: CGPDFStringRef?
         guard CGPDFObjectGetValue(object, .string, &value),
               let value,
               let text = CGPDFStringCopyTextString(value) else {
-            return nil
+            throw PDFX4TestInspectionError.invalidPDFString(label)
         }
         return text as String
     }
@@ -1334,6 +1377,39 @@ struct PDFXMPTestSnapshot {
     let modifyDate: String
     let metadataDate: String
     let creatorCount: Int
+}
+
+private final class PDFXMLStringCollector: NSObject, XMLParserDelegate {
+    private var textBuffers: [String] = []
+    private(set) var values: [String] = []
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String]
+    ) {
+        values.append(contentsOf: attributeDict.values)
+        textBuffers.append("")
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        guard !textBuffers.isEmpty else { return }
+        textBuffers[textBuffers.count - 1] += string
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        guard let text = textBuffers.popLast() else { return }
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            values.append(text)
+        }
+    }
 }
 
 private final class PDFXMPTestParserDelegate: NSObject, XMLParserDelegate {

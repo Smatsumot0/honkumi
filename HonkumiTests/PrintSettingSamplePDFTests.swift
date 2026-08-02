@@ -3,6 +3,10 @@ import PDFKit
 @testable import Honkumi
 import XCTest
 
+private enum CropMarkArtifactPersistenceError: Error, Equatable {
+    case unexpectedPageSize(PageSize)
+}
+
 final class PrintSettingSamplePDFTests: XCTestCase {
     func testPDFX4FinalizationPreservesAllRequiredFontSizeRendering() throws {
         let requiredSizes: Set<CGFloat> = [7, 10, 12, 12.5, 16.5]
@@ -68,17 +72,19 @@ final class PrintSettingSamplePDFTests: XCTestCase {
     // Catches metadata finalization changing page geometry, content, text, pixels, or
     // any non-Info object in production-size PDFs whose crop marks are actually enabled.
     func testPDFX4MetadataFinalizationPreservesCropMarkedProductionSizes() throws {
-        let representativeSamples = PageSize.selectableCases.compactMap { pageSize in
+        let expectedPageSizes: [PageSize] = [.a6, .shinsho, .b6]
+        XCTAssertEqual(PageSize.selectableCases, expectedPageSizes)
+
+        let representativeSamples = expectedPageSizes.compactMap { pageSize in
             PrintSettingSampleManifest.recommendedSettingCases().first {
                 $0.document.settings.pageSize == pageSize
                     && $0.pageBand == .pages1Through48
             }
         }
 
-        XCTAssertEqual(representativeSamples.count, PageSize.selectableCases.count)
         XCTAssertEqual(
-            Set(representativeSamples.map(\.document.settings.pageSize)),
-            Set(PageSize.selectableCases)
+            representativeSamples.map(\.document.settings.pageSize),
+            expectedPageSizes
         )
 
         for sample in representativeSamples {
@@ -120,6 +126,21 @@ final class PrintSettingSamplePDFTests: XCTestCase {
             try persistCropMarkArtifactIfRequested(
                 capture.afterData,
                 pageSize: pageSize
+            )
+        }
+    }
+
+    func testCropMarkArtifactPersistenceRejectsUnexpectedSizeWithoutEnvironment() {
+        XCTAssertThrowsError(
+            try persistCropMarkArtifactIfRequested(
+                Data(),
+                pageSize: .a5,
+                environment: [:]
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? CropMarkArtifactPersistenceError,
+                .unexpectedPageSize(.a5)
             )
         }
     }
@@ -189,18 +210,9 @@ final class PrintSettingSamplePDFTests: XCTestCase {
 
     private func persistCropMarkArtifactIfRequested(
         _ data: Data,
-        pageSize: PageSize
+        pageSize: PageSize,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws {
-        guard let directory = ProcessInfo.processInfo.environment[
-            "HONKUMI_PDF_X4_ARTIFACT_DIR"
-        ] else {
-            return
-        }
-        let directoryURL = URL(fileURLWithPath: directory, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directoryURL,
-            withIntermediateDirectories: true
-        )
         let fileName: String
         switch pageSize {
         case .a6:
@@ -210,9 +222,16 @@ final class PrintSettingSamplePDFTests: XCTestCase {
         case .shinsho:
             fileName = "Shinsho-cropmarks.pdf"
         case .a5, .b5:
-            XCTFail("Unexpected non-production page size: \(pageSize.displayName)")
+            throw CropMarkArtifactPersistenceError.unexpectedPageSize(pageSize)
+        }
+        guard let directory = environment["HONKUMI_PDF_X4_ARTIFACT_DIR"] else {
             return
         }
+        let directoryURL = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
         try data.write(to: directoryURL.appendingPathComponent(fileName), options: .atomic)
     }
 

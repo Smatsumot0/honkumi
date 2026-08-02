@@ -72,11 +72,39 @@ final class PDFX4GeneratedPDFTests: XCTestCase {
         }
     }
 
+    func testXMPStringInspectionDecodesTextAndAttributeEntities() throws {
+        let xmp = Data(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <root attribute="attribute &amp; &lt;decoded&gt;">
+              text &amp; &lt;decoded&gt;
+              <child><![CDATA[cdata & <decoded>]]></child>
+            </root>
+            """.utf8
+        )
+
+        let values = try PDFX4TestInspector.inspectXMPStrings(xmp)
+
+        XCTAssertTrue(values.contains("attribute & <decoded>"))
+        XCTAssertTrue(values.contains { $0.contains("text & <decoded>") })
+        XCTAssertTrue(values.contains("cdata & <decoded>"))
+    }
+
+    func testOutputIntentInspectionReportsActualNonemptyArrayCount() throws {
+        let pdf = PDFTestFixtureBuilder.malformedQuartzStylePDF(
+            includeReadablePage: true,
+            additionalCatalogEntries:
+                " /OutputIntents [<< /Type /OutputIntent >> << /Type /OutputIntent >>]"
+        )
+
+        XCTAssertEqual(try PDFX4TestInspector.outputIntentCount(in: pdf), 2)
+    }
+
     // Catches colophon identity and contact values being copied into document metadata.
     // The rendered colophon may legitimately contain these values, so inspect only Info and XMP.
     func testEnabledColophonValuesRemainAbsentFromInfoAndXMP() throws {
-        let author = "private-author-7E1D6FC8"
-        let circle = "private-circle-2A79B4E5"
+        let author = "private-author-&-7E1D6FC8"
+        let circle = "private-circle-<2A79B4E5>"
         let contact = "private-contact-81C3@example.invalid"
         let url = "https://private.example.invalid/4D98B2A7"
         var document = ManuscriptDocument(title: "Metadata privacy", body: "本文")
@@ -100,15 +128,13 @@ final class PDFX4GeneratedPDFTests: XCTestCase {
         XCTAssertNil(semantic.infoAuthor)
         XCTAssertEqual(semantic.xmpCreatorCount, 0)
 
-        let xmpText = try XCTUnwrap(
-            String(data: PDFX4TestInspector.xmpData(in: data), encoding: .utf8)
-        )
+        let xmpValues = try PDFX4TestInspector.xmpStrings(in: data)
         for secret in [author, circle, contact, url] {
-            XCTAssertFalse(xmpText.contains(secret))
+            XCTAssertFalse(xmpValues.contains { $0.contains(secret) })
         }
         let infoValues = try PDFX4TestInspector.infoStrings(in: data)
         for secret in [author, circle, contact, url] {
-            XCTAssertFalse(infoValues.values.contains(secret))
+            XCTAssertFalse(infoValues.values.contains { $0.contains(secret) })
         }
     }
 
