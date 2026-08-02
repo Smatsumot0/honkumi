@@ -82,6 +82,30 @@ nonisolated struct PDFX4DocumentMetadata: Equatable, Sendable {
     let documentID: UUID
     let instanceID: UUID
 
+    private init(
+        title: String,
+        author: String?,
+        subject: String,
+        keywords: String,
+        creatorTool: String,
+        producer: String,
+        creationDate: Date,
+        modificationDate: Date,
+        documentID: UUID,
+        instanceID: UUID
+    ) {
+        self.title = Self.canonicalTitle(title)
+        self.author = author
+        self.subject = subject
+        self.keywords = keywords
+        self.creatorTool = creatorTool
+        self.producer = producer
+        self.creationDate = creationDate
+        self.modificationDate = modificationDate
+        self.documentID = documentID
+        self.instanceID = instanceID
+    }
+
     static func make(
         title: String,
         documentID: UUID,
@@ -119,6 +143,42 @@ nonisolated struct PDFX4DocumentMetadata: Equatable, Sendable {
         formatter.formatOptions = [.withInternetDateTime]
         formatter.timeZone = TimeZone(secondsFromGMT: 0)!
         return formatter.string(from: date)
+    }
+
+    private static func canonicalTitle(_ title: String) -> String {
+        var result = ""
+        var followsCarriageReturn = false
+
+        for scalar in title.unicodeScalars {
+            if scalar.value == 0x0D {
+                result.append("\n")
+                followsCarriageReturn = true
+                continue
+            }
+            if scalar.value == 0x0A, followsCarriageReturn {
+                followsCarriageReturn = false
+                continue
+            }
+            followsCarriageReturn = false
+
+            guard isAllowedXMLMetadataScalar(scalar) else { continue }
+            result.unicodeScalars.append(scalar)
+        }
+        return result
+    }
+
+    private static func isAllowedXMLMetadataScalar(_ scalar: Unicode.Scalar) -> Bool {
+        let value = scalar.value
+        if value == 0x09 || value == 0x0A {
+            return true
+        }
+        if value < 0x20 || (0x7F...0x9F).contains(value) {
+            return false
+        }
+        if (0xFDD0...0xFDEF).contains(value) || value & 0xFFFE == 0xFFFE {
+            return false
+        }
+        return true
     }
 }
 

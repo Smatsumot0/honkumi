@@ -36,6 +36,39 @@ final class PDFX4GeneratedPDFTests: XCTestCase {
         XCTAssertEqual(xmp.metadataDate, xmp.modifyDate)
     }
 
+    func testCanonicalMetadataNormalizesArbitraryTitleForInfoAndXMP() throws {
+        let noncharacter = String(UnicodeScalar(0xFDD0)!)
+        let metadata = PDFX4DocumentMetadata.make(
+            title: "A\u{0000}B\u{000B}C\(noncharacter)D\rE\r\nF & < > \" '",
+            documentID: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        )
+        let expectedTitle = "ABCD\nE\nF & < > \" '"
+        let profile = PDFPrintProduction.pdfX4Profile
+
+        XCTAssertEqual(metadata.title, expectedTitle)
+        XCTAssertEqual(
+            profile.documentInfo(for: metadata)[kCGPDFContextTitle as String] as? String,
+            expectedTitle
+        )
+
+        let finalized = try PDFX4StructureFinalizer.finalizedData(
+            from: PDFTestFixtureBuilder.malformedQuartzStylePDF(
+                infoEntries: " /Title (Old)",
+                includeReadablePage: true
+            ),
+            metadata: metadata
+        )
+        XCTAssertEqual(
+            try PDFX4TestInspector.infoStrings(in: finalized)["Title"],
+            expectedTitle
+        )
+
+        let xmp = try PDFX4TestInspector.inspectXMP(
+            profile.xmpMetadataData(for: metadata)
+        )
+        XCTAssertEqual(xmp.title, expectedTitle)
+    }
+
     func testRequiredFontSizesProduceValidStructuresForNormalAndSpreadPDFs() throws {
         let samples = PrintSettingSampleManifest.fontSizeCases().filter {
             requiredSizes.contains($0.document.settings.fontSize)

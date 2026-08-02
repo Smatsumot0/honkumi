@@ -1117,8 +1117,9 @@ nonisolated enum PDFInfoDictionaryNormalizer {
             ("ModDate", pdfTextString(PDFX4DocumentMetadata.pdfDateString(metadata.modificationDate))),
             ("Trapped", Data("/False".utf8))
         ]
-        if let author = metadata.author {
-            replacements.insert(("Author", pdfTextString(author)), at: 1)
+        let canonicalAuthor = metadata.author.flatMap { $0.isEmpty ? nil : $0 }
+        if let canonicalAuthor {
+            replacements.insert(("Author", pdfTextString(canonicalAuthor)), at: 1)
         }
 
         let entriesByName = Dictionary(uniqueKeysWithValues: synchronizedEntries.map {
@@ -1135,12 +1136,18 @@ nonisolated enum PDFInfoDictionaryNormalizer {
             output.insert(contentsOf: insertion, at: entries.endStart)
         }
 
-        for replacement in replacements.compactMap({ replacement -> (Entry, Data)? in
-            entriesByName[replacement.name].map { ($0, replacement.value) }
-        }).sorted(by: { $0.0.valueStart > $1.0.valueStart }) {
+        var edits = replacements.compactMap { replacement -> (Range<Int>, Data)? in
+            entriesByName[replacement.name].map {
+                ($0.valueStart..<$0.valueEnd, replacement.value)
+            }
+        }
+        if canonicalAuthor == nil, let authorEntry = entriesByName["Author"] {
+            edits.append((authorEntry.nameStart..<authorEntry.valueEnd, Data()))
+        }
+        for edit in edits.sorted(by: { $0.0.lowerBound > $1.0.lowerBound }) {
             output.replaceSubrange(
-                replacement.0.valueStart..<replacement.0.valueEnd,
-                with: replacement.1
+                edit.0,
+                with: edit.1
             )
         }
         return output
@@ -1185,6 +1192,7 @@ nonisolated enum PDFInfoDictionaryNormalizer {
             if cursor.atDictionaryEndForNormalizer() {
                 return (result, cursor.position)
             }
+            let nameStart = cursor.position
             guard let name = cursor.readNameForNormalizer() else {
                 throw PDFX4FinalizationError.invalidInfoDictionary
             }
@@ -1195,12 +1203,18 @@ nonisolated enum PDFInfoDictionaryNormalizer {
             } catch {
                 throw PDFX4FinalizationError.invalidInfoDictionary
             }
-            result.append(Entry(name: name, valueStart: valueStart, valueEnd: cursor.position))
+            result.append(Entry(
+                name: name,
+                nameStart: nameStart,
+                valueStart: valueStart,
+                valueEnd: cursor.position
+            ))
         }
     }
 
     private struct Entry {
         let name: String
+        let nameStart: Int
         let valueStart: Int
         let valueEnd: Int
     }

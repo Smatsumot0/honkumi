@@ -31,6 +31,32 @@ final class PDFX4StructureFinalizerTests: XCTestCase {
         XCTAssertNil(info["Author"])
     }
 
+    func testMetadataFinalizationRemovesExistingAuthorOnlyFromMetadataAwarePath() throws {
+        let input = PDFTestFixtureBuilder.malformedQuartzStylePDF(
+            infoEntries: " /Title (Fixture) /Author (private-author) /Private (preserved)",
+            includeReadablePage: true
+        )
+        let metadata = PDFX4DocumentMetadata.make(
+            title: "Fixture",
+            documentID: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        )
+
+        let metadataAware = try PDFX4StructureFinalizer.finalizedData(
+            from: input,
+            metadata: metadata
+        )
+        let metadataAwareInfoBody = try PDFX4TestInspector.infoObjectBody(in: metadataAware)
+        let metadataAwareInfo = try PDFX4TestInspector.infoStrings(in: metadataAware)
+        XCTAssertNil(metadataAwareInfo["Author"])
+        XCTAssertEqual(metadataAwareInfo["Private"], "preserved")
+        XCTAssertFalse(metadataAwareInfoBody.contains(Data("/Author".utf8)))
+
+        let structuralOnly = try PDFX4StructureFinalizer.finalizedData(from: input)
+        let structuralOnlyInfo = try PDFX4TestInspector.infoStrings(in: structuralOnly)
+        XCTAssertEqual(structuralOnlyInfo["Author"], "private-author")
+        XCTAssertEqual(structuralOnlyInfo["Private"], "preserved")
+    }
+
     func testMetadataFinalizationRejectsDuplicateProducerEntries() {
         let metadata = PDFX4DocumentMetadata.make(
             title: "Fixture",
